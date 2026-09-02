@@ -25,12 +25,16 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             build-essential libssl-dev libelf-dev flex bison bc rsync \
             python3 python3-pip python3-yaml \
+            python3-libfdt \
             gcc-aarch64-linux-gnu device-tree-compiler
-          # dtbs_check 需要 dtschema >= 2023.9；pin 2023.11（Metadata 2.1，
-          # 兼容 Ubuntu 22.04 自带 pip 22.0.2，新版 2026.x 用 Metadata 2.4 会报 metadata-generation-failed）
-          python3 -m pip install --user "dtschema==2023.11" yamllint
+          # dtbs_check 需要 dtschema；pylibfdt 用 apt 预编译包满足，
+          # 其余纯 Python 依赖 --no-deps 安装以避开 pip 对新版 setuptools_scm 的解析失败
+          python3 -m pip install --user --no-deps \
+            "dtschema==2023.11" "yamllint==1.35.1" \
+            "ruamel.yaml>=0.16" "jsonschema<4.18" rfc3987 pathspec pyyaml
           export PATH="$HOME/.local/bin:$PATH"
           aarch64-linux-gnu-gcc --version | head -1
+          python3 -c "import pylibfdt, dtschema; print('pylibfdt+dtschema import OK')"
           dt-doc-validate --version
 
       - name: Clone sm8250-mainline Linux kernel
