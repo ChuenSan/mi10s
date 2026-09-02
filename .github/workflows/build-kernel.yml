@@ -1,0 +1,96 @@
+name: build-sm8250-kernel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/**'
+
+jobs:
+  build:
+    name: Build SM8250 mainline kernel (thyme)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross toolchain and build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libssl-dev libelf-dev flex bison bc rsync \
+            gcc-aarch64-linux-gnu device-tree-compiler
+          aarch64-linux-gnu-gcc --version | head -1
+
+      - name: Clone sm8250-mainline Linux kernel
+        run: |
+          git clone --depth=1 -b sm8250/v6.13 \
+            https://gitlab.com/sm8250-mainline/linux.git \
+            "$HOME/linux-sm8250"
+          cd "$HOME/linux-sm8250"
+          git rev-parse HEAD > "$GITHUB_WORKSPACE/kernel-commit.txt"
+          git log -1 --format='%s' >> "$GITHUB_WORKSPACE/kernel-commit.txt"
+          cat "$GITHUB_WORKSPACE/kernel-commit.txt"
+
+      - name: Configure kernel
+        run: |
+          cd "$HOME/linux-sm8250"
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make defconfig
+          scripts/config \
+            --enable  CONFIG_EFI_STUB \
+            --enable  CONFIG_SCSI_UFSHCD \
+            --enable  CONFIG_SCSI_UFSHCD_PLATFORM \
+            --enable  CONFIG_SCSI_UFS_QCOM \
+            --enable  CONFIG_PHY_QCOM_QMP_UFS \
+            --enable  CONFIG_USB_DWC3 \
+            --enable  CONFIG_USB_DWC3_QCOM \
+            --enable  CONFIG_USB_CONFIGFS_RNDIS \
+            --enable  CONFIG_ARCH_QCOM \
+            --enable  CONFIG_DEVTMPFS_MOUNT
+          scripts/config \
+            --enable  CONFIG_EFI_ZBOOT \
+            --disable CONFIG_FB_EFI \
+            --enable  CONFIG_NLS_ASCII
+          make olddefconfig
+          echo '--- requested symbols after olddefconfig ---'
+          grep -E 'CONFIG_(EFI_STUB|SCSI_UFSHCD|SCSI_UFSHCD_PLATFORM|SCSI_UFS_QCOM|PHY_QCOM_QMP_UFS|USB_DWC3|USB_DWC3_QCOM|USB_CONFIGFS_RNDIS|ARCH_QCOM|DEVTMPFS_MOUNT|EFI_ZBOOT|NLS_ASCII|FB_EFI)=' .config || true
+
+      - name: Build kernel
+        run: |
+          cd "$HOME/linux-sm8250"
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make -j"$(nproc)" Image Image.gz dtbs modules 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      - name: Verify build artifacts
+        run: |
+          cd "$HOME/linux-sm8250"
+          ls -l arch/arm64/boot/Image arch/arm64/boot/Image.gz
+          ls -l arch/arm64/boot/dts/qcom/sm8250-xiaomi-elish-csot.dtb
+          test -s arch/arm64/boot/Image
+          test -s arch/arm64/boot/Image.gz
+          test -s arch/arm64/boot/dts/qcom/sm8250-xiaomi-elish-csot.dtb
+          echo "modules built (.ko count): $(find . -name '*.ko' | wc -l)"
+
+      - name: Stage artifacts for upload
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp "$HOME/linux-sm8250/arch/arm64/boot/Image" "$GITHUB_WORKSPACE/dist/Image"
+          cp "$HOME/linux-sm8250/arch/arm64/boot/Image.gz" "$GITHUB_WORKSPACE/dist/Image.gz"
+          cp "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-elish-csot.dtb" "$GITHUB_WORKSPACE/dist/"
+          cp "$HOME/linux-sm8250/.config" "$GITHUB_WORKSPACE/dist/config"
+          cp "$GITHUB_WORKSPACE/kernel-commit.txt" "$GITHUB_WORKSPACE/dist/" || true
+          cp "$GITHUB_WORKSPACE/build.log" "$GITHUB_WORKSPACE/dist/" || true
+          ls -l "$GITHUB_WORKSPACE/dist"
+
+      - name: Upload kernel artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: sm8250-thyme-kernel
+          path: dist/
+          if-no-files-found: error

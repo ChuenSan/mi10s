@@ -1,0 +1,3 @@
+# Never commit cloned kernel source or CI build outputs
+/linux-sm8250/
+/dist/
