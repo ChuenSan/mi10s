@@ -24,9 +24,11 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends \
             build-essential libssl-dev libelf-dev flex bison bc rsync \
-            python3 python3-pip \
+            python3 python3-pip python3-yaml \
             gcc-aarch64-linux-gnu device-tree-compiler
+          pip3 install --user dtschema yamllint
           aarch64-linux-gnu-gcc --version | head -1
+          dt-doc-validate --version || echo "dtschema 可用性待编译步骤确认"
 
       - name: Clone sm8250-mainline Linux kernel
         run: |
@@ -91,11 +93,12 @@ jobs:
       - name: Run dtbs_check (thyme)
         run: |
           cd "$HOME/linux-sm8250"
+          export PATH="$HOME/.local/bin:$PATH"
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           make dtbs_check W=1 2>&1 | tee "$GITHUB_WORKSPACE/dtbs-check.log" || true
-          echo "--- thyme 相关 warning ---"
-          grep -iE 'thyme|sm8250-xiaomi-thyme' "$GITHUB_WORKSPACE/dtbs-check.log" || echo "(无 thyme 直接相关 warning)"
+          echo "--- thyme 直接相关 warning/error ---"
+          grep -iE 'sm8250-xiaomi-thyme|xiaomi,thyme' "$GITHUB_WORKSPACE/dtbs-check.log" || echo "(无 thyme 直接相关 warning)"
 
       - name: Stage artifacts for upload
         run: |
