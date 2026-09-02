@@ -105,8 +105,8 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           # 只校验 thyme 一个 dtb（CHECK_DTBS=y + 目标 dtb），避免全量 make dtbs_check
-          # 遍历整个 qcom 目录（数百个 dtb）耗时 >1 小时
-          make CHECK_DTBS=y W=1 arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb 2>&1 | tee "$GITHUB_WORKSPACE/dtbs-check.log" || true
+          # 遍历整个 qcom 目录（数百个 dtb）耗时 >1 小时；目标用相对 dts 目录的路径
+          make CHECK_DTBS=y W=1 qcom/sm8250-xiaomi-thyme.dtb 2>&1 | tee "$GITHUB_WORKSPACE/dtbs-check.log" || true
           echo "--- thyme 直接相关 warning/error ---"
           grep -iE 'sm8250-xiaomi-thyme|xiaomi,thyme' "$GITHUB_WORKSPACE/dtbs-check.log" || echo "(无 thyme 直接相关 warning)"
 
