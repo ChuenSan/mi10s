@@ -522,7 +522,3 @@
 	regulator-max-microamp = <3000000>;
 	status = "okay";
 };
-
-&tlmm {
-	gpio-reserved-ranges = <40 4>;
-};
