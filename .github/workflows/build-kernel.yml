@@ -35,7 +35,7 @@ jobs:
           export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
           aarch64-linux-gnu-gcc --version | head -1
           python3 -m pip --version
-          python3 -c "import pylibfdt, dtschema; print('pylibfdt+dtschema import OK')"
+          python3 -c "import libfdt, dtschema; print('libfdt+dtschema import OK')"
           dt-doc-validate --version
 
       - name: Clone sm8250-mainline Linux kernel
