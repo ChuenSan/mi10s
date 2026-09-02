@@ -28,15 +28,11 @@ jobs:
             swig python3-dev \
             gcc-aarch64-linux-gnu device-tree-compiler
           # 内核 writing-schema 文档：dtschema 需 swig + Python 开发文件；
-          # 升级 pip 以正确解析新版元数据并在隔离环境编译 pylibfdt
-          python3 -m pip install --user --upgrade pip setuptools wheel
-          python3 -m pip install --user dtschema yamllint
-          # GH runner 的 python 禁用了 user-site，需显式导出 PATH 与 PYTHONPATH，
-          # 并持久化到后续 step（dtbs_check 等也依赖）
-          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
-          echo "PYTHONPATH=$HOME/.local/lib/python3.10/site-packages" >> "$GITHUB_ENV"
-          export PATH="$HOME/.local/bin:$PATH"
-          export PYTHONPATH="$HOME/.local/lib/python3.10/site-packages"
+          # 升级 pip 后在隔离环境编译 pylibfdt；--break-system-packages 写系统 site，
+          # 避免 GH runner 禁用 user-site 导致 import 失败
+          sudo python3 -m pip install --upgrade pip setuptools wheel
+          sudo python3 -m pip install --break-system-packages dtschema yamllint
+          export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
           aarch64-linux-gnu-gcc --version | head -1
           python3 -m pip --version
           python3 -c "import pylibfdt, dtschema; print('pylibfdt+dtschema import OK')"
@@ -105,7 +101,7 @@ jobs:
       - name: Run dtbs_check (thyme)
         run: |
           cd "$HOME/linux-sm8250"
-          export PATH="$HOME/.local/bin:$PATH"
+          export PATH="/usr/local/bin:$PATH"
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           make dtbs_check W=1 2>&1 | tee "$GITHUB_WORKSPACE/dtbs-check.log" || true
