@@ -460,7 +460,9 @@
 };
 
 &usb_1_dwc3 {
-	dr_mode = "otg";
+	/* MIUI 实机 dr_mode=drd；drd 同时注册 host+gadget，/sys/class/udc 才有 UDC
+	 *（configfs gadget 绑定的前提）。otg 走传统 OTG 状态机，无 UDC 可枚举。 */
+	dr_mode = "drd";
 	maximum-speed = "high-speed";
 	/* 先去除 USB3 phy */
 	phys = <&usb_1_hsphy>;

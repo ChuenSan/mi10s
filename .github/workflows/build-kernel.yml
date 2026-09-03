@@ -71,16 +71,30 @@ jobs:
             --enable  CONFIG_PHY_QCOM_QMP_UFS \
             --enable  CONFIG_USB_DWC3 \
             --enable  CONFIG_USB_DWC3_QCOM \
-            --enable  CONFIG_USB_CONFIGFS_RNDIS \
-            --enable  CONFIG_PHY_QCOM_QMP_USB \
-            --enable  CONFIG_TYPEC_QCOM_PMIC \
+            --enable  CONFIG_USB_DWC3_DUAL_ROLE \
             --enable  CONFIG_PHY_QCOM_QUSB2 \
             --enable  CONFIG_ARCH_QCOM \
             --enable  CONFIG_DEVTMPFS_MOUNT
+          # --- 无串口诊断通道：USB gadget 全链路内置（=y），小 initramfs 无模块可用 ---
+          # configfs + libcomposite + ACM 串口（+ECM 网卡备选）
+          scripts/config \
+            --enable  CONFIG_USB_CONFIGFS \
+            --enable  CONFIG_USB_LIBCOMPOSITE \
+            --enable  CONFIG_USB_F_ACM \
+            --enable  CONFIG_USB_U_SERIAL \
+            --enable  CONFIG_USB_F_ECM \
+            --enable  CONFIG_USB_U_ETHER \
+            --enable  CONFIG_USB_GADGET \
+            --enable  CONFIG_USB_OTG \
+            --enable  CONFIG_USB_ROLE_SWITCH \
+            --enable  CONFIG_USB_CONFIGFS_SERIAL \
+            --enable  CONFIG_USB_CONFIGFS_ECM
+          # 调试用：KALLSYMS / 更高日志
           scripts/config \
             --enable  CONFIG_EFI_ZBOOT \
             --disable CONFIG_FB_EFI \
-            --enable  CONFIG_NLS_ASCII
+            --enable  CONFIG_NLS_ASCII \
+            --enable  CONFIG_KALLSYMS
           make olddefconfig
 
       - name: Build kernel image + dtbs
@@ -138,6 +152,8 @@ jobs:
       - name: Generate boot-thyme.img (header v2)
         run: |
           cd "$GITHUB_WORKSPACE"
+          # 诊断 cmdline：earlycon + 最高日志 + initcall 跟踪 + 保活，走 USB gadget
+          CMDLINE="console=ttyMSM0,115200n8 earlycon ignore_loglevel loglevel=8 initcall_debug clk_ignore_unused pd_ignore_unused rootwait panic=30"
           python3 tools/mkbootimg.py \
             --header_version 2 \
             --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image.gz" \
@@ -149,9 +165,10 @@ jobs:
             --dtb_offset 0x01f00000 \
             --tags_offset 0x00000100 \
             --pagesize 4096 \
-            --cmdline "console=ttyMSM0,115200n8 earlycon clk_ignore_unused pd_ignore_unused rootwait" \
+            --cmdline "$CMDLINE" \
             -o boot-thyme.img
-          ls -l boot-thyme.img
+          cp boot-thyme.img boot-thyme-debug.img
+          ls -l boot-thyme.img boot-thyme-debug.img
           stat -c 'boot-thyme.img size = %s bytes' boot-thyme.img | tee boot-img-size.txt
 
       - name: Verify boot-thyme.img (unpack)
@@ -176,6 +193,7 @@ jobs:
         run: |
           mkdir -p "$GITHUB_WORKSPACE/dist"
           cp "$GITHUB_WORKSPACE/boot-thyme.img"        "$GITHUB_WORKSPACE/dist/" || true
+          cp "$GITHUB_WORKSPACE/boot-thyme-debug.img"  "$GITHUB_WORKSPACE/dist/" || true
           cp "$GITHUB_WORKSPACE/boot-img-size.txt"     "$GITHUB_WORKSPACE/dist/" || true
           cp "$GITHUB_WORKSPACE/initramfs/initramfs.cpio.gz" "$GITHUB_WORKSPACE/dist/" || true
           cd "$HOME/linux-sm8250"
