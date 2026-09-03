@@ -165,9 +165,44 @@ Xiaomi Mi 10S（`thyme`，SM8250/Kona）Device Tree 迁移登记。
 > 官方 4.19 的 `qca,bt-reset-gpio=21` + `qca,bt-sw-ctrl-gpio=124` 在 mainline `qcom,qca6390-bt`
 > binding 里由 `enable-gpios` 表达，无需逐字照搬 BSP 私有 `qca,*` 属性。
 
+## 十一、GPU / GMU
+
+| 项 | 官方 4.19 | 6.13 | 状态 |
+|---|---|---|---|
+| GPU | `qcom,kgsl-3d0@3d00000`（kgsl 私有） | `&gpu`（`qcom,adreno-650`）+ `&gmu` | ✅ 平台级内建 |
+| firmware | `a650_zap` | `zap-shader` 子节点 | ✅ thyme 无特殊差异 |
+
+> **结论**：thyme GPU 无特有差异（Adreno 650，平台级 sm8250.dtsi 已有），仅需 enable。
+
+## 十二、DPU / MDSS / DSI
+
+| 项 | 官方 4.19 | 6.13 | 状态 |
+|---|---|---|---|
+| MDSS | `mdss_mdp@ae00000` | `&mdss`+`&mdss_mdp`（`qcom,sm8250-dpu`） | ✅ 平台级内建 |
+| DSI0 | `mdss_dsi_ctrl0@ae94000` | `&mdss_dsi0`（`qcom,mdss-dsi-ctrl`） | ✅ |
+| DSI0 PHY | `mdss_dsi_pll@ae94900` | `&mdss_dsi0_phy`（`qcom,sm8250-dsi-phy-14nm`） | ✅ |
+| panel | `qcom,mdss_dsi_*`（BSP） | `&mdss_dsi0 { panel@0 { drm_panel } }` | ⚠️ 见下 |
+
+## 十三、thyme Panel
+
+| 项 | 官方 4.19 thyme 事实 | mainline | 状态 |
+|---|---|---|---|
+| 真机屏型号 | `xiaomi 42 04 0a` / `xiaomi 42 02 0b`（cnss 42 族） | `csot,j2-mp-42-02-0b-dsc` | 需 backport |
+| 分辨率 | 1080×2340（`0x438 × 0x924`） | driver mode 1080×2340 | ✅ 匹配 |
+| 模式 | cmd mode + DSC（`compression-mode=dsc`） | DSC（drm_dsc） | ✅ |
+| 物理尺寸 | 6.67" | 71.0×153.7mm | ✅ 10S 6.67" |
+| vddio | — | `vreg_l14a_1p8` | ✅ |
+| reset/te gpio | BSP pinctrl | `reset-gpios=<tlmm 12>`,`disprate-gpios=<tlmm 50>` | ✅ 参考 umi |
+
+> **关键判定**：thyme 真屏 = CSOT `csot,j2-mp-42-02-0b-dsc`（1080×2340+DSC，6.67"）。
+> **该 driver 在 7.2（umi）里存在，但 6.13 缺失** → **需要 backport**
+> （panel-j2-mp-42-02-0b-dsc.c + binding yaml + Kconfig/Makefile）。
+> 6.13 里的 `boe,bf060y8m-aj0`（1080×2160）分辨率不符，**不能硬套**。
+
 ## 待办 / 未迁移（后续批次）
 
-- **第三批**：DPU/MDSS、DSI/panel、GPU、Audio、Touchscreen、Charging、Sensors、UDFPS 指纹
+- **下一批**：Audio、Touchscreen、Charging、Sensors、UDFPS 指纹
+- **Panel driver backport**：`csot,j2-mp-42-02-0b-dsc`（7.2→6.13，需新增 driver）
 - Camera：暂时后置，不作阻塞项
 
 ## Vendor 私有 property 待筛清单（重点）
