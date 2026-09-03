@@ -110,10 +110,65 @@ jobs:
           echo "--- thyme 直接相关 warning/error ---"
           grep -iE 'sm8250-xiaomi-thyme|xiaomi,thyme' "$GITHUB_WORKSPACE/dtbs-check.log" || echo "(无 thyme 直接相关 warning)"
 
+      - name: Build minimal ARM64 initramfs
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/make-initramfs.sh" "$GITHUB_WORKSPACE/initramfs"
+          ls -l "$GITHUB_WORKSPACE/initramfs/initramfs.cpio.gz"
+
+      - name: Fetch AOSP mkbootimg tools
+        run: |
+          # 官方 Android boot image 工具（header v2 支持 DTB 字段），取 GitHub 镜像原始文件
+          curl -fsSL -o "$GITHUB_WORKSPACE/mkbootimg.py" \
+            https://raw.githubusercontent.com/aosp-mirror/platform_system_tools_mkbootimg/master/mkbootimg.py
+          curl -fsSL -o "$GITHUB_WORKSPACE/unpack_bootimg.py" \
+            https://raw.githubusercontent.com/aosp-mirror/platform_system_tools_mkbootimg/master/unpack_bootimg.py
+          ls -l "$GITHUB_WORKSPACE/mkbootimg.py" "$GITHUB_WORKSPACE/unpack_bootimg.py"
+          python3 "$GITHUB_WORKSPACE/mkbootimg.py" --help 2>&1 | head -20
+
+      - name: Generate boot-thyme.img (header v2)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          python3 mkbootimg.py \
+            --header_version 2 \
+            --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image.gz" \
+            --ramdisk initramfs/initramfs.cpio.gz \
+            --dtb "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" \
+            --base 0x00000000 \
+            --kernel_offset 0x00008000 \
+            --ramdisk_offset 0x01000000 \
+            --dtb_offset 0x01f00000 \
+            --tags_offset 0x00000100 \
+            --pagesize 4096 \
+            --cmdline "console=ttyMSM0,115200n8 earlycon clk_ignore_unused pd_ignore_unused rootwait" \
+            -o boot-thyme.img
+          ls -l boot-thyme.img
+          stat -c 'boot-thyme.img size = %s bytes' boot-thyme.img | tee boot-img-size.txt
+
+      - name: Verify boot-thyme.img (unpack)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          rm -rf unpack && mkdir unpack
+          python3 unpack_bootimg.py \
+            --boot_img boot-thyme.img \
+            --out unpack \
+            --format mkbootimg > unpack/verify.sh
+          echo "--- unpack 目录内容 ---"
+          find unpack -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+          echo "--- 强制校验 kernel/ramdisk/dtb 非空 ---"
+          for f in unpack/kernel unpack/ramdisk unpack/dtb; do
+            test -s "$f" || { echo "FAIL: $f 为空"; exit 1; }
+          done
+          echo "--- header version / magic ---"
+          grep -E 'header_version|os_version|page_size|kernel_cmdline' unpack/verify.sh | head -20
+          echo "boot-thyme.img 校验通过：kernel + ramdisk + dtb 均非空（header v2）"
+
       - name: Stage artifacts for upload
         run: |
-          cd "$HOME/linux-sm8250"
           mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp "$GITHUB_WORKSPACE/boot-thyme.img"        "$GITHUB_WORKSPACE/dist/" || true
+          cp "$GITHUB_WORKSPACE/boot-img-size.txt"     "$GITHUB_WORKSPACE/dist/" || true
+          cp "$GITHUB_WORKSPACE/initramfs/initramfs.cpio.gz" "$GITHUB_WORKSPACE/dist/" || true
+          cd "$HOME/linux-sm8250"
           cp arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb "$GITHUB_WORKSPACE/dist/"
           cp arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dts "$GITHUB_WORKSPACE/dist/"
           cp arch/arm64/boot/Image      "$GITHUB_WORKSPACE/dist/"      || true
