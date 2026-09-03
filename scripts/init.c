@@ -1,19 +1,17 @@
 // SPDX-License-Identifier: GPL-2.0-or-later
 /*
- * 阶段 6 诊断 init v3（ARM64，静态，无 busybox）。
+ * 第一次 Runtime bring-up 诊断 init（ARM64 静态，无 busybox）。
  *
- * 目标：确立「Kernel → initramfs → /init → userspace 已到达」这一事实，
- * 以可观察的「约 30s 后主动 reboot」作为判断信号。
+ * 目标：确立「Kernel → DTB → initramfs → /init → userspace」链路，
+ * 并尝试建立 USB gadget（ACM 优先，ECM 兜底）作为唯一可观察通道。
  *
  * 行为：
  *   1. mount devtmpfs/proc/sysfs/configfs
- *   2. 向 /dev/kmsg 写 THYME_STAGE6_USERSPACE_REACHED
- *   3. 枚举 /sys/class/udc；若有 UDC，建最简 USB gadget（ACM 优先，ECM 兜底）
- *   4. 等约 30s 主动 reboot(RB_AUTOBOOT)
- *
- * 判断：
- *   B 槽每次约 30s 后稳定自动重启 → Kernel 已启动 + initramfs 已加载 + /init 已执行
- *   Mac 同时枚举到 USB 设备 → USB/DWC3 已工作
+ *   2. 向 /dev/kmsg 写 THYME_USERSPACE_REACHED
+ *   3. 枚举 /sys/class/udc，打印到 /dev/console
+ *   4. 若有 UDC，建 configfs USB gadget（ACM 优先）
+ *   5. 打印 /proc/cmdline
+ *   6. 保活循环（sleep），不自动退出
  */
 #define _GNU_SOURCE
 #include <dirent.h>
@@ -22,7 +20,6 @@
 #include <string.h>
 #include <unistd.h>
 #include <sys/mount.h>
-#include <sys/reboot.h>
 #include <sys/stat.h>
 
 static void w(const char *p, const char *s)
@@ -36,11 +33,32 @@ static void w(const char *p, const char *s)
 
 static void log_all(const char *s)
 {
-    int fd;
-    fd = open("/dev/kmsg", O_WRONLY);
-    if (fd >= 0) { (void)write(fd, s, strlen(s)); close(fd); }
+    int fd = open("/dev/kmsg", O_WRONLY);
+    if (fd >= 0) {
+        (void)write(fd, s, strlen(s));
+        close(fd);
+    }
     fd = open("/dev/console", O_WRONLY);
-    if (fd >= 0) { (void)write(fd, s, strlen(s)); close(fd); }
+    if (fd >= 0) {
+        (void)write(fd, s, strlen(s));
+        close(fd);
+    }
+}
+
+/* 写 gadget 配置值：把 base 路径 + 子路径拼接后写 value */
+static void gw(const char *base, const char *sub, const char *val)
+{
+    char path[256];
+    snprintf(path, sizeof(path), "%s%s", base, sub);
+    w(path, val);
+}
+
+/* 建目录：base 路径 + 子路径拼接 */
+static void gmkdir(const char *base, const char *sub)
+{
+    char path[256];
+    snprintf(path, sizeof(path), "%s%s", base, sub);
+    (void)mkdir(path, 0755);
 }
 
 /* 建最简 USB gadget：ACM 优先，失败回落 ECM。返回 1 绑定成功 */
@@ -49,37 +67,55 @@ static int setup_gadget(const char *udc)
     const char *g = "/sys/kernel/config/usb_gadget/g1";
 
     (void)mkdir(g, 0755);
-    w(g "/idVendor",  "0x18d1");
-    w(g "/idProduct", "0x4d11");
-    w(g "/bcdDevice", "0x0100");
-    w(g "/bcdUSB",    "0x0200");
-    (void)mkdir(g "/strings/0x409", 0755);
-    w(g "/strings/0x409/serialnumber", "THYME6");
-    w(g "/strings/0x409/manufacturer", "thyme-mainline");
-    w(g "/strings/0x409/product",      "Stage6 diag");
-    (void)mkdir(g "/configs/c.1", 0755);
-    w(g "/configs/c.1/MaxPower", "500");
-    (void)mkdir(g "/configs/c.1/strings/0x409", 0755);
-    w(g "/configs/c.1/strings/0x409/configuration", "diag");
+    gw(g, "/idVendor",  "0x18d1");
+    gw(g, "/idProduct", "0x4d11");
+    gw(g, "/bcdDevice", "0x0100");
+    gw(g, "/bcdUSB",    "0x0200");
+    gmkdir(g, "/strings/0x409");
+    gw(g, "/strings/0x409/serialnumber", "THYME6");
+    gw(g, "/strings/0x409/manufacturer", "thyme-mainline");
+    gw(g, "/strings/0x409/product",      "Stage6 diag");
+    gmkdir(g, "/configs/c.1");
+    gw(g, "/configs/c.1/MaxPower", "500");
+    gmkdir(g, "/configs/c.1/strings/0x409");
+    gw(g, "/configs/c.1/strings/0x409/configuration", "diag");
 
     /* ACM 优先 */
-    (void)mkdir(g "/functions/acm.0", 0755);
-    if (symlink(g "/functions/acm.0", g "/configs/c.1/acm.0") == 0) {
-        w(g "/UDC", udc);
+    gmkdir(g, "/functions/acm.0");
+    if (symlink("/sys/kernel/config/usb_gadget/g1/functions/acm.0",
+                "/sys/kernel/config/usb_gadget/g1/configs/c.1/acm.0") == 0) {
+        gw(g, "/UDC", udc);
         log_all("[init] gadget: ACM bound\n");
         return 1;
     }
 
     /* ECM 兜底 */
-    (void)mkdir(g "/functions/ecm.0", 0755);
-    if (symlink(g "/functions/ecm.0", g "/configs/c.1/ecm.0") == 0) {
-        w(g "/UDC", udc);
+    gmkdir(g, "/functions/ecm.0");
+    if (symlink("/sys/kernel/config/usb_gadget/g1/functions/ecm.0",
+                "/sys/kernel/config/usb_gadget/g1/configs/c.1/ecm.0") == 0) {
+        gw(g, "/UDC", udc);
         log_all("[init] gadget: ECM fallback bound\n");
         return 1;
     }
 
     log_all("[init] gadget: bind FAILED\n");
     return 0;
+}
+
+static void dump_cmdline(void)
+{
+    char buf[1024];
+    int fd = open("/proc/cmdline", O_RDONLY);
+    if (fd < 0)
+        return;
+    ssize_t n = read(fd, buf, sizeof(buf) - 1);
+    close(fd);
+    if (n > 0) {
+        buf[n] = '\0';
+        log_all("[init] cmdline: ");
+        log_all(buf);
+        log_all("\n");
+    }
 }
 
 int main(void)
@@ -97,7 +133,7 @@ int main(void)
     (void)mkdir("/sys/kernel/config", 0755);
     (void)mount("configfs", "/sys/kernel/config", "configfs", 0, NULL);
 
-    log_all("\n======== THYME_STAGE6_USERSPACE_REACHED ========\n");
+    log_all("\n======== THYME_USERSPACE_REACHED ========\n");
 
     /* 枚举 UDC */
     d = opendir("/sys/class/udc");
@@ -121,10 +157,11 @@ int main(void)
     if (got)
         setup_gadget(first_udc);
 
-    log_all("[init] will auto-reboot in 30s\n");
-    sleep(30);
+    dump_cmdline();
 
-    sync();
-    reboot(RB_AUTOBOOT);
+    /* 保活：不自动退出 */
+    for (;;)
+        sleep(3600);
+
     return 0;
 }

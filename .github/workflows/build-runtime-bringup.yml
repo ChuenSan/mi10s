@@ -1,0 +1,196 @@
+name: build-runtime-bringup
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - '.github/workflows/build-runtime-bringup.yml'
+      - 'dts/**'
+      - 'patches/**'
+      - 'scripts/**'
+
+jobs:
+  build:
+    name: Runtime bring-up image (thyme)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross toolchain and build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libssl-dev libelf-dev flex bison bc rsync \
+            python3 python3-pip python3-yaml \
+            swig python3-dev \
+            gcc-aarch64-linux-gnu libc6-dev-arm64-cross \
+            device-tree-compiler cpio
+          sudo python3 -m pip install --upgrade pip setuptools wheel
+          sudo python3 -m pip install --break-system-packages dtschema yamllint
+          aarch64-linux-gnu-gcc --version | head -1
+          test -f /usr/aarch64-linux-gnu/include/bits/wordsize.h \
+            && echo "aarch64 cross glibc headers OK"
+
+      - name: Clone sm8250-mainline Linux kernel
+        run: |
+          git clone --depth=1 -b sm8250/v6.13 \
+            https://gitlab.com/sm8250-mainline/linux.git \
+            "$HOME/linux-sm8250"
+          cd "$HOME/linux-sm8250"
+          git rev-parse HEAD > "$GITHUB_WORKSPACE/kernel-commit.txt"
+          git log -1 --format='%s' >> "$GITHUB_WORKSPACE/kernel-commit.txt"
+          cat "$GITHUB_WORKSPACE/kernel-commit.txt"
+
+      - name: Inject thyme DTS + panel backport
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/inject-thyme-dts.sh" "$HOME/linux-sm8250"
+          bash "$GITHUB_WORKSPACE/scripts/inject-panel-backport.sh" "$HOME/linux-sm8250"
+
+      - name: Configure kernel (bring-up built-in)
+        run: |
+          cd "$HOME/linux-sm8250"
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make defconfig
+          # 基础平台 + 启动
+          scripts/config \
+            --enable  CONFIG_ARCH_QCOM \
+            --enable  CONFIG_EFI_STUB \
+            --enable  CONFIG_DEVTMPFS \
+            --enable  CONFIG_DEVTMPFS_MOUNT \
+            --enable  CONFIG_TMPFS \
+            --enable  CONFIG_PROC_FS \
+            --enable  CONFIG_SYSFS
+          # UFS 存储
+          scripts/config \
+            --enable  CONFIG_SCSI \
+            --enable  CONFIG_SCSI_UFSHCD \
+            --enable  CONFIG_SCSI_UFSHCD_PLATFORM \
+            --enable  CONFIG_SCSI_UFS_QCOM \
+            --enable  CONFIG_PHY_QCOM_QMP_UFS \
+            --enable  CONFIG_PHY_QCOM_QUSB2
+          # USB DWC3 + gadget 全链路（=y，无模块）
+          scripts/config \
+            --enable  CONFIG_USB \
+            --enable  CONFIG_USB_DWC3 \
+            --enable  CONFIG_USB_DWC3_QCOM \
+            --enable  CONFIG_USB_DWC3_DUAL_ROLE \
+            --enable  CONFIG_USB_XHCI_HCD \
+            --enable  CONFIG_USB_CONFIGFS \
+            --enable  CONFIG_USB_LIBCOMPOSITE \
+            --enable  CONFIG_USB_F_ACM \
+            --enable  CONFIG_USB_U_SERIAL \
+            --enable  CONFIG_USB_F_ECM \
+            --enable  CONFIG_USB_U_ETHER \
+            --enable  CONFIG_USB_GADGET \
+            --enable  CONFIG_USB_OTG \
+            --enable  CONFIG_USB_ROLE_SWITCH \
+            --enable  CONFIG_USB_CONFIGFS_SERIAL \
+            --enable  CONFIG_USB_CONFIGFS_ECM
+          # Display / Panel (built-in)
+          scripts/config \
+            --enable  CONFIG_DRM \
+            --enable  CONFIG_DRM_MSM \
+            --enable  CONFIG_DRM_PANEL \
+            --enable  CONFIG_DRM_MIPI_DSI \
+            --enable  CONFIG_BACKLIGHT_CLASS_DEVICE \
+            --enable  CONFIG_DRM_DSC_HELPER \
+            --enable  CONFIG_DRM_PANEL_CSOT_MP42020B
+          # 调试
+          scripts/config \
+            --enable  CONFIG_KALLSYMS \
+            --enable  CONFIG_PRINTK \
+            --enable  CONFIG_DYNAMIC_DEBUG
+          make olddefconfig
+
+      - name: Build kernel + dtbs
+        run: |
+          cd "$HOME/linux-sm8250"
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make -j"$(nproc)" Image Image.gz dtbs 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+
+      - name: Build diagnostic initramfs
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/make-initramfs.sh" "$GITHUB_WORKSPACE/initramfs"
+          ls -l "$GITHUB_WORKSPACE/initramfs/initramfs.cpio.gz"
+
+      - name: Fetch AOSP mkbootimg tools
+        run: |
+          GS="https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/master"
+          mkdir -p "$GITHUB_WORKSPACE/tools/gki"
+          curl -fsSL "${GS}/mkbootimg.py?format=TEXT" | base64 -d > "$GITHUB_WORKSPACE/tools/mkbootimg.py"
+          curl -fsSL "${GS}/unpack_bootimg.py?format=TEXT" | base64 -d > "$GITHUB_WORKSPACE/tools/unpack_bootimg.py"
+          curl -fsSL "${GS}/gki/generate_gki_certificate.py?format=TEXT" | base64 -d > "$GITHUB_WORKSPACE/tools/gki/generate_gki_certificate.py"
+          : > "$GITHUB_WORKSPACE/tools/gki/__init__.py"
+          chmod +x "$GITHUB_WORKSPACE/tools/mkbootimg.py" "$GITHUB_WORKSPACE/tools/unpack_bootimg.py"
+
+      - name: Generate boot-thyme-test.img (header v2)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          CMDLINE="console=ttyMSM0,115200n8 earlycon ignore_loglevel loglevel=8 initcall_debug clk_ignore_unused pd_ignore_unused rootwait"
+          python3 tools/mkbootimg.py \
+            --header_version 2 \
+            --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image.gz" \
+            --ramdisk initramfs/initramfs.cpio.gz \
+            --dtb "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" \
+            --base 0x00000000 \
+            --kernel_offset 0x00008000 \
+            --ramdisk_offset 0x01000000 \
+            --dtb_offset 0x01f00000 \
+            --tags_offset 0x00000100 \
+            --pagesize 4096 \
+            --cmdline "$CMDLINE" \
+            -o boot-thyme-test.img
+          ls -l boot-thyme-test.img
+          stat -c 'boot-thyme-test.img size = %s bytes' boot-thyme-test.img | tee boot-img-size.txt
+
+      - name: Verify boot image (unpack)
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p unpack
+          python3 tools/unpack_bootimg.py \
+            --boot_img boot-thyme-test.img \
+            --out unpack \
+            --format mkbootimg > unpack/verify.sh
+          echo "--- unpack 目录 ---"
+          find unpack -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+          echo "--- 强制校验 kernel/ramdisk/dtb 非空 ---"
+          for f in unpack/kernel unpack/ramdisk unpack/dtb; do
+            test -s "$f" || { echo "FAIL: $f 为空"; exit 1; }
+          done
+          echo "--- header 摘要 ---"
+          grep -E 'header_version|page_size|kernel_cmdline' unpack/verify.sh | head -20
+
+      - name: Stage artifacts + SHA256
+        run: |
+          cd "$GITHUB_WORKSPACE"
+          mkdir -p dist
+          cp "$HOME/linux-sm8250/arch/arm64/boot/Image"       dist/ || true
+          cp "$HOME/linux-sm8250/arch/arm64/boot/Image.gz"    dist/ || true
+          cp "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" dist/
+          cp initramfs/initramfs.cpio.gz                       dist/
+          cp boot-thyme-test.img                               dist/
+          cp "$HOME/linux-sm8250/.config"                      dist/config || true
+          cp kernel-commit.txt                                 dist/ || true
+          cp build.log                                         dist/ || true
+          cp boot-img-size.txt                                 dist/ || true
+          cp unpack/verify.sh                                  dist/unpack-verify.sh || true
+          # DTB 大小
+          stat -c 'sm8250-xiaomi-thyme.dtb size = %s bytes' "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" | tee dist/dtb-size.txt
+          # SHA256
+          (cd dist && sha256sum Image Image.gz sm8250-xiaomi-thyme.dtb initramfs.cpio.gz boot-thyme-test.img > SHA256SUMS)
+          cat dist/SHA256SUMS
+          echo "--- dist 目录 ---"
+          ls -l dist/
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: thyme-bringup-test
+          path: dist/
+          if-no-files-found: error

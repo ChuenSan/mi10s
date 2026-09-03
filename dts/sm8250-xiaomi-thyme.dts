@@ -517,11 +517,10 @@
 };
 
 &usb_1_dwc3 {
-	dr_mode = "otg";
-	/* 官方 4.19 thyme usb0 = USB 2.0 only */
-	maximum-speed = "high-speed";
-	phys = <&usb_1_hsphy>;
-	phy-names = "usb2-phy";
+	/* drd 同时注册 host+gadget，/sys/class/udc 才有 UDC 供 configfs gadget 绑定 */
+	dr_mode = "drd";
+	/* usb_1 承担 USB gadget 诊断通道，保留 USB3 qmp phy 供 DP/gadget 高速 */
+	maximum-speed = "super-speed";
 };
 
 &usb_1_hsphy {
