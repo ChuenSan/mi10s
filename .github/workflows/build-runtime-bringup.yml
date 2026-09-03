@@ -112,7 +112,10 @@ jobs:
           cd "$HOME/linux-sm8250"
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          make -j"$(nproc)" Image Image.gz dtbs 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+          make -j"$(nproc)" Image dtbs 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+          # Image.gz 非必需，若生成失败不阻塞（ABL 可加载未压缩 Image）
+          make Image.gz 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log" || true
+          ls -l arch/arm64/boot/Image arch/arm64/boot/Image.gz 2>&1 || true
 
       - name: Build diagnostic initramfs
         run: |
@@ -135,7 +138,7 @@ jobs:
           CMDLINE="console=ttyMSM0,115200n8 earlycon ignore_loglevel loglevel=8 initcall_debug clk_ignore_unused pd_ignore_unused rootwait"
           python3 tools/mkbootimg.py \
             --header_version 2 \
-            --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image.gz" \
+            --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image" \
             --ramdisk initramfs/initramfs.cpio.gz \
             --dtb "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" \
             --base 0x00000000 \
