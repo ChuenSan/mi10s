@@ -7,11 +7,12 @@ on:
     paths:
       - '.github/workflows/**'
       - 'dts/**'
+      - 'dts-reference/**'
       - 'scripts/**'
 
 jobs:
   build:
-    name: Build SM8250 mainline kernel (thyme)
+    name: Build SM8250 DTBS (thyme)
     runs-on: ubuntu-22.04
     timeout-minutes: 180
 
@@ -26,18 +27,11 @@ jobs:
             build-essential libssl-dev libelf-dev flex bison bc rsync \
             python3 python3-pip python3-yaml \
             swig python3-dev \
-            gcc-aarch64-linux-gnu libc6-dev-arm64-cross device-tree-compiler
-          # 内核 writing-schema 文档：dtschema 需 swig + Python 开发文件；
-          # 升级 pip 后在隔离环境编译 pylibfdt；--break-system-packages 写系统 site，
-          # 避免 GH runner 禁用 user-site 导致 import 失败
+            gcc-aarch64-linux-gnu device-tree-compiler
           sudo python3 -m pip install --upgrade pip setuptools wheel
           sudo python3 -m pip install --break-system-packages dtschema yamllint
           export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
           aarch64-linux-gnu-gcc --version | head -1
-          # 验证交叉 glibc 头文件就位（init.c 静态链接需要 aarch64 的 libc）
-          test -f /usr/aarch64-linux-gnu/include/bits/wordsize.h \
-            && echo "aarch64 cross glibc headers OK" \
-            || echo "WARN: libc6-dev-arm64-cross headers missing"
           python3 -m pip --version
           python3 -c "import libfdt, dtschema; print('libfdt+dtschema import OK')"
           dt-doc-validate --version
@@ -63,52 +57,25 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           make defconfig
+          # 仅使能 dtbs build / check 所需的平台 config
           scripts/config \
-            --enable  CONFIG_EFI_STUB \
+            --enable  CONFIG_ARCH_QCOM \
             --enable  CONFIG_SCSI_UFSHCD \
             --enable  CONFIG_SCSI_UFSHCD_PLATFORM \
             --enable  CONFIG_SCSI_UFS_QCOM \
             --enable  CONFIG_PHY_QCOM_QMP_UFS \
             --enable  CONFIG_USB_DWC3 \
             --enable  CONFIG_USB_DWC3_QCOM \
-            --enable  CONFIG_USB_DWC3_DUAL_ROLE \
             --enable  CONFIG_PHY_QCOM_QUSB2 \
-            --enable  CONFIG_ARCH_QCOM \
             --enable  CONFIG_DEVTMPFS_MOUNT
-          # --- 无串口诊断通道：USB gadget 全链路内置（=y），小 initramfs 无模块可用 ---
-          # configfs + libcomposite + ACM 串口（+ECM 网卡备选）
-          scripts/config \
-            --enable  CONFIG_USB_CONFIGFS \
-            --enable  CONFIG_USB_LIBCOMPOSITE \
-            --enable  CONFIG_USB_F_ACM \
-            --enable  CONFIG_USB_U_SERIAL \
-            --enable  CONFIG_USB_F_ECM \
-            --enable  CONFIG_USB_U_ETHER \
-            --enable  CONFIG_USB_GADGET \
-            --enable  CONFIG_USB_OTG \
-            --enable  CONFIG_USB_ROLE_SWITCH \
-            --enable  CONFIG_USB_CONFIGFS_SERIAL \
-            --enable  CONFIG_USB_CONFIGFS_ECM
-          # 调试用：KALLSYMS / 更高日志
-          scripts/config \
-            --enable  CONFIG_EFI_ZBOOT \
-            --disable CONFIG_FB_EFI \
-            --enable  CONFIG_NLS_ASCII \
-            --enable  CONFIG_KALLSYMS
-          # --- 无串口下的临终日志：ramoops 内置 + 持续 mirror console ---
-          # PSTORE_RAM=m 在 initramfs 下永远不加载，DT ramoops@b0000000 无 driver 匹配；
-          # PSTORE_CONSOLE 实时镜像 kernel log 到保留内存，hang 前最后的日志得以回 A 槽读取。
-          scripts/config \
-            --enable  CONFIG_PSTORE_RAM \
-            --enable  CONFIG_PSTORE_CONSOLE
           make olddefconfig
 
-      - name: Build kernel image + dtbs
+      - name: Build dtbs
         run: |
           cd "$HOME/linux-sm8250"
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          make -j"$(nproc)" Image Image.gz dtbs 2>&1 | tee "$GITHUB_WORKSPACE/dtbs-build.log"
+          make -j"$(nproc)" dtbs 2>&1 | tee "$GITHUB_WORKSPACE/dtbs-build.log"
 
       - name: Verify thyme DTB
         run: |
@@ -128,86 +95,16 @@ jobs:
           export PATH="/usr/local/bin:$PATH"
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          # 只校验 thyme 一个 dtb（CHECK_DTBS=y + 目标 dtb），避免全量 make dtbs_check
-          # 遍历整个 qcom 目录（数百个 dtb）耗时 >1 小时；目标用相对 dts 目录的路径
           make CHECK_DTBS=y W=1 qcom/sm8250-xiaomi-thyme.dtb 2>&1 | tee "$GITHUB_WORKSPACE/dtbs-check.log" || true
           echo "--- thyme 直接相关 warning/error ---"
           grep -iE 'sm8250-xiaomi-thyme|xiaomi,thyme' "$GITHUB_WORKSPACE/dtbs-check.log" || echo "(无 thyme 直接相关 warning)"
 
-      - name: Build minimal ARM64 initramfs
-        run: |
-          bash "$GITHUB_WORKSPACE/scripts/make-initramfs.sh" "$GITHUB_WORKSPACE/initramfs"
-          ls -l "$GITHUB_WORKSPACE/initramfs/initramfs.cpio.gz"
-
-      - name: Fetch AOSP mkbootimg tools
-        run: |
-          # 官方 Android boot image 工具（header v2 支持 DTB 字段）。
-          # googlesource 无 GitHub 镜像，用 ?format=TEXT 接口（base64）解码落地。
-          # master 的 mkbootimg.py 会 `from gki.generate_gki_certificate import ...`，
-          # 故需一并拉取 gki 子模块并建成包（仅标准库依赖）。
-          GS="https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/master"
-          mkdir -p "$GITHUB_WORKSPACE/tools/gki"
-          curl -fsSL "${GS}/mkbootimg.py?format=TEXT" | base64 -d > "$GITHUB_WORKSPACE/tools/mkbootimg.py"
-          curl -fsSL "${GS}/unpack_bootimg.py?format=TEXT" | base64 -d > "$GITHUB_WORKSPACE/tools/unpack_bootimg.py"
-          curl -fsSL "${GS}/gki/generate_gki_certificate.py?format=TEXT" | base64 -d > "$GITHUB_WORKSPACE/tools/gki/generate_gki_certificate.py"
-          : > "$GITHUB_WORKSPACE/tools/gki/__init__.py"
-          chmod +x "$GITHUB_WORKSPACE/tools/mkbootimg.py" "$GITHUB_WORKSPACE/tools/unpack_bootimg.py"
-          ls -lR "$GITHUB_WORKSPACE/tools"
-          python3 "$GITHUB_WORKSPACE/tools/mkbootimg.py" --help 2>&1 | head -20
-
-      - name: Generate boot-thyme.img (header v2)
-        run: |
-          cd "$GITHUB_WORKSPACE"
-          # 诊断 cmdline：无 panic=30（避免 panic 强制重启干扰 hang 判断）；init 为最小保活，不碰 USB
-          CMDLINE="console=ttyMSM0,115200n8 earlycon ignore_loglevel loglevel=8 initcall_debug clk_ignore_unused pd_ignore_unused rootwait printk.always_kmsg_dump"
-          python3 tools/mkbootimg.py \
-            --header_version 2 \
-            --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image.gz" \
-            --ramdisk initramfs/initramfs.cpio.gz \
-            --dtb "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" \
-            --base 0x00000000 \
-            --kernel_offset 0x00008000 \
-            --ramdisk_offset 0x01000000 \
-            --dtb_offset 0x01f00000 \
-            --tags_offset 0x00000100 \
-            --pagesize 4096 \
-            --cmdline "$CMDLINE" \
-            -o boot-thyme.img
-          cp boot-thyme.img boot-thyme-debug.img
-          ls -l boot-thyme.img boot-thyme-debug.img
-          stat -c 'boot-thyme.img size = %s bytes' boot-thyme.img | tee boot-img-size.txt
-
-      - name: Verify boot-thyme.img (unpack)
-        run: |
-          cd "$GITHUB_WORKSPACE"
-          rm -rf unpack && mkdir unpack
-          python3 tools/unpack_bootimg.py \
-            --boot_img boot-thyme.img \
-            --out unpack \
-            --format mkbootimg > unpack/verify.sh
-          echo "--- unpack 目录内容 ---"
-          find unpack -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
-          echo "--- 强制校验 kernel/ramdisk/dtb 非空 ---"
-          for f in unpack/kernel unpack/ramdisk unpack/dtb; do
-            test -s "$f" || { echo "FAIL: $f 为空"; exit 1; }
-          done
-          echo "--- header version / magic ---"
-          grep -E 'header_version|os_version|page_size|kernel_cmdline' unpack/verify.sh | head -20
-          echo "boot-thyme.img 校验通过：kernel + ramdisk + dtb 均非空（header v2）"
-
       - name: Stage artifacts for upload
         run: |
           mkdir -p "$GITHUB_WORKSPACE/dist"
-          cp "$GITHUB_WORKSPACE/boot-thyme.img"        "$GITHUB_WORKSPACE/dist/" || true
-          cp "$GITHUB_WORKSPACE/boot-thyme-debug.img"  "$GITHUB_WORKSPACE/dist/" || true
-          cp "$GITHUB_WORKSPACE/boot-img-size.txt"     "$GITHUB_WORKSPACE/dist/" || true
-          cp "$GITHUB_WORKSPACE/initramfs/initramfs.cpio.gz" "$GITHUB_WORKSPACE/dist/" || true
           cd "$HOME/linux-sm8250"
           cp arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb "$GITHUB_WORKSPACE/dist/"
           cp arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dts "$GITHUB_WORKSPACE/dist/"
-          cp arch/arm64/boot/Image      "$GITHUB_WORKSPACE/dist/"      || true
-          cp arch/arm64/boot/Image.gz   "$GITHUB_WORKSPACE/dist/"      || true
-          cp .config                    "$GITHUB_WORKSPACE/dist/config" || true
           cp "$GITHUB_WORKSPACE/kernel-commit.txt"     "$GITHUB_WORKSPACE/dist/" || true
           cp "$GITHUB_WORKSPACE/dtbs-build.log"       "$GITHUB_WORKSPACE/dist/" || true
           cp "$GITHUB_WORKSPACE/dtbs-check.log"       "$GITHUB_WORKSPACE/dist/" || true
@@ -217,6 +114,6 @@ jobs:
       - name: Upload kernel artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: sm8250-thyme-kernel
+          name: sm8250-thyme-dtbs
           path: dist/
           if-no-files-found: error
