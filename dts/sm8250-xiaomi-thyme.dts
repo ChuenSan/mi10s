@@ -126,6 +126,15 @@
 			linux,can-disable;
 			wakeup-source;
 		};
+
+		key-hall {
+			label = "Hall Key";
+			gpios = <&tlmm 14 GPIO_ACTIVE_LOW>;
+			linux,input-type = <EV_SW>;
+			linux,code = <SW_LID>;
+			debounce-interval = <15>;
+			wakeup-source;
+		};
 	};
 
 	/*
@@ -674,4 +683,33 @@
 &mdss_dsi0_phy {
 	vdds-supply = <&vreg_l5a_0p88>;
 	status = "okay";
+};
+
+/*
+ * Audio：双 CS35L41 功放（官方 4.19 i2c3@98c000）。
+ * irq/reset GPIO 取自官方会话（@40→irq113、@42→irq112，共用 reset114）。
+ * 完整 sound card（WCD938x SoundWire + dai-link）依赖 rxmacro/swr 配置，
+ * 留待下一轮补齐；本批先落功放骨架。
+ */
+&i2c3 {
+	status = "okay";
+	clock-frequency = <400000>;
+
+	cs35l41_l: speaker-amp@40 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x40>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <113 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 114 GPIO_ACTIVE_HIGH>;
+		#sound-dai-cells = <1>;
+	};
+
+	cs35l41_r: speaker-amp@42 {
+		compatible = "cirrus,cs35l41";
+		reg = <0x42>;
+		interrupt-parent = <&tlmm>;
+		interrupts = <112 IRQ_TYPE_LEVEL_LOW>;
+		reset-gpios = <&tlmm 114 GPIO_ACTIVE_HIGH>;
+		#sound-dai-cells = <1>;
+	};
 };

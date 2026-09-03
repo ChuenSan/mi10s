@@ -266,11 +266,52 @@ Xiaomi Mi 10S（`thyme`，SM8250/Kona）Device Tree 迁移登记。
 | 电量计 qcom fg-gen4 | 6.13 无 driver（非 bq27z561） | — |
 | 小米私有 cp-qc30/usbpd-pm/ds28e16 | 无 mainline 对应 | — |
 
-## 待办 / 未迁移（后续批次）
+## 十八、Sensors
 
-- **下一批**：Sensors、UDFPS 指纹
-- **Driver backport**：Panel / Touch / 无线充电（本阶段统一记录，暂不执行）
-- Camera：暂时后置，不作阻塞项
+| 项 | 官方 4.19 thyme | 6.13 | 状态 |
+|---|---|---|---|
+| 指纹 | `goodix,fingerprint`（pwr=10, irq=23, reset=24） | 无 driver | ❌ 缺失 |
+| 霍尔传感器 | `hall_key`（GPIO 14） | gpio-keys | 🔧 可迁移（gpio-keys 子项） |
+| 环境光 | `ambient-sensor="ABT-SENSOR"`（HAL 层） | 无明文 DTS 节点 | ❌ 缺失/私有 |
+| ToF | `vreg_tof` 电源 + 芯片 | 无 driver | ❌ 缺失 |
+| MEMS(accel/gyro/mag) | DTS 无明文节点（HAL 私有加载） | — | 🚧 无法从 DTS 确认 |
+
+> **结论**：thyme MEMS 传感器在 4.19 DTS 里无标准 I2C 节点（走小米 vendor HAL），
+> 仅指纹/霍尔/环境光/ToF 可部分确认，其中仅霍尔可迁移（gpio-keys），其余 6.13 缺失。
+
+## 十九、UDFPS / Fingerprint
+
+| 项 | 官方 4.19 thyme | 6.13 | 状态 |
+|---|---|---|---|
+| 独立指纹 | `goodix,fingerprint`（侧边电容，pwr/irq/reset=10/23/24） | 无 driver | ❌ 缺失 |
+| 屏下 FOD | GT9886 touch 内 FOD 参数（goodix@5d） | 无完整支持 | ❌ 缺失 |
+| 小米私有 FOD | `goodix,fod-*` 一堆 | mainline 无 | ❌ 私有 |
+
+> **结论**：UDFPS/指纹 6.13 无完整支持（goodix fingerprint driver + FOD 定制均缺失）。
+
+## 最终 Support Matrix（三类汇总）
+
+### A. 可直接迁移 / 已完成
+SoC identity · reserved-memory · PM8150/8150B/8150L/8009 · regulator · UFS · USB ·
+PCIe · QCA6390 Wi-Fi/BT · GPU · DPU/MDSS/DSI（结构） · CS35L41 功放 · simple-battery · 霍尔传感器
+
+### B. 6.13 driver 存在，但需复杂 routing / glue
+- **Audio 完整 sound card**：WCD938x SoundWire + dai-link，需还原失真 GPIO 与 swr 配置
+- **Charging 有线快充**：bq25970 可取，但双电芯 master/slave 与 SMB1390 耦合未明
+
+### C. 6.13 缺失，需 backport 或暂缓
+Panel（csot,j2-mp-42-02-0b-dsc） · Touch（goodix GT9886 / st,fts） ·
+无线充电（ln8282/p9415/smb1355） · 电荷泵（hl6111r/smb1390） · 电量计（qcom fg-gen4） ·
+UDFPS（goodix fingerprint + FOD） · 指纹 · ToF · 环境光 · 小米私有 cp-qc30/usbpd-pm · Camera
+
+## 建议放弃 / 暂缓项
+
+| 功能 | 理由 |
+|---|---|
+| 小米私有 cp-qc30/usbpd-pm | Android 私有接口，mainline 无等价 driver，建议放弃 |
+| 无线充电 ln8282/p9415 | 6.13 无 driver，非启动必需，建议暂缓 |
+| ToF 激光对焦 | 相机相关，随 Camera 一并暂缓 |
+| 环境光/接近（ABT） | vendor HAL 私有，mainline 用标准 iio 替代，暂缓 |
 
 ## Vendor 私有 property 待筛清单（重点）
 
