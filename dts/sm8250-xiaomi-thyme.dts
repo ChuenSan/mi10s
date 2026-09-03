@@ -460,11 +460,16 @@
 };
 
 &usb_1_dwc3 {
-	/* MIUI 实机 dr_mode=drd；drd 同时注册 host+gadget，/sys/class/udc 才有 UDC
-	 *（configfs gadget 绑定的前提）。otg 走传统 OTG 状态机，无 UDC 可枚举。 */
-	dr_mode = "drd";
+	/*
+	 * 参照主线 sm8250-xiaomi-elish-common.dtsi（已在主线跑通）：
+	 * USB2.0 only 下必须 dr_mode="otg"（不是 drd）。
+	 * drd 会强制走 dual-role 完整初始化，缺 USB3 phy 时崩溃（花屏闪关机）。
+	 * otg + usb-role-switch 在 DWC3 >=3.30a 下默认从 peripheral 起步并注册 UDC，
+	 * 仍能枚举 gadget。
+	 */
+	dr_mode = "otg";
 	maximum-speed = "high-speed";
-	/* 先去除 USB3 phy */
+	/* 去除 USB3 phy */
 	phys = <&usb_1_hsphy>;
 	phy-names = "usb2-phy";
 	usb-role-switch;
