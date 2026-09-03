@@ -154,8 +154,8 @@ jobs:
           cp unpack/verify.sh                                  dist/unpack-verify.sh || true
           # DTB 大小
           stat -c 'sm8250-xiaomi-thyme.dtb size = %s bytes' "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" | tee dist/dtb-size.txt
-          # SHA256
-          (cd dist && sha256sum Image Image.gz sm8250-xiaomi-thyme.dtb initramfs.cpio.gz boot-thyme-test.img > SHA256SUMS)
+          # SHA256（只对实际存在的文件）
+          (cd dist && sha256sum * 2>/dev/null | grep -v SHA256SUMS > SHA256SUMS)
           cat dist/SHA256SUMS
           echo "--- dist 目录 ---"
           ls -l dist/
