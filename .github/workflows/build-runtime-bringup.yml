@@ -113,10 +113,11 @@ jobs:
           cd "$HOME/linux-sm8250"
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
-          make -j"$(nproc)" Image dtbs 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
-          # Image.gz 非必需，若生成失败不阻塞（ABL 可加载未压缩 Image）
-          make Image.gz 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log" || true
-          ls -l arch/arm64/boot/Image arch/arm64/boot/Image.gz 2>&1 || true
+          # 先单独 make Image（强制触发 vmlinux→Image 完整链接链），再 make dtbs
+          make -j"$(nproc)" Image 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
+          test -s arch/arm64/boot/Image || { echo "FAIL: Image 未生成"; exit 1; }
+          make -j"$(nproc)" dtbs 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
+          ls -l arch/arm64/boot/Image arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb
 
       - name: Build diagnostic initramfs
         run: |
