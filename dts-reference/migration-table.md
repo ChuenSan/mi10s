@@ -131,10 +131,43 @@ Xiaomi Mi 10S（`thyme`，SM8250/Kona）Device Tree 迁移登记。
 
 ---
 
+## 八、PCIe
+
+| 项 | 官方 4.19 thyme | 6.13 | 状态 |
+|---|---|---|---|
+| 控制器 | `pcie0@1c00000`（Wi-Fi 挂这） | `&pcie0`（`qcom,sm8250-pcie`） | ✅ |
+| PHY | pcie phy | `&pcie0_phy`（`qcom,sm8250-qmp-gen3x2-pcie-phy`） | ✅ 供电 vdda-phy=l5a/vdda-pll=l9a |
+| endPoint | `cnss_pci`（cnss 私有） | `&pcieport0 { wifi@0 { pci17cb,1101 } }` | ✅ 去 cnss 私有 |
+| pcie1/pcie2 | 存在（modem/其他） | 暂不迁移（非 Wi-Fi 路径） | 🚧 |
+
+## 九、QCA6390 Wi-Fi
+
+| 项 | 官方 4.19 | 6.13 elish 参考 | 状态 |
+|---|---|---|---|
+| 设备 | `qcom,cnss-qca6390@b0000000`（`qcom,cnss-qca6390`） | `qca6390-pmu`（`qcom,qca6390-pmu`）+ `wifi@0`（`pci17cb,1101`） | ✅ 换 mainline binding |
+| enable GPIO | `wlan-en-gpio=<tlmm 20>` | `wlan-enable-gpios=<&tlmm 20>` | ✅ GPIO 一致 |
+| 供电(五路) | aon/dig/io/rfa1/rfa2 = 950/950/1800/1900/1350mV | pmu 内部 ldo0~ldo9 + 外部 s6a/s5a/s4a/s8c | ✅ 电压值吻合 |
+| **calibration-variant** | BSP 无此属性 | elish=`"Xiaomi_Pad_5Pro"` | ⚠️ **thyme 值待从实机 firmware 确认** |
+
+> 关键：QCA6390 供电网 thyme 与 elish 电压一致（aon=950/dig=950/io=1800/rfa1=1900/rfa2=1350，
+> asd=3024~3304→L16A 完全匹配），可复用 elish 的 pmu ldo 结构。
+
+## 十、Bluetooth
+
+| 项 | 官方 4.19 thyme | 6.13 elish 参考 | 状态 |
+|---|---|---|---|
+| 数据链路 | SLIMbus（`qca6390` codec）+ cnss 私有 | `&uart6 { bluetooth { qcom,qca6390-bt } }` | ✅ UART 取代 SLIMbus |
+| **UART** | `qupv3_se6_4uart@998000`（`wakeup-byte=0xfd`） | `&uart6`（`serial@998000`） | ✅ 同 se6，thyme BT 用 uart6 |
+| enable/reset GPIO | `bt-reset-gpio=21`、`bt-sw-ctrl-gpio=124` | `bt-enable-gpios=<&tlmm 21>` | ✅ GPIO 一致 |
+| 供电 | 五路与 Wi-Fi 共享 | pmu 内部 ldo（btcmx/aon/rfa*） | ✅ |
+
+> **与 elish 差异**：thyme debug 串口=`uart2`，BT=`uart6`（两者独立）；elish debug 与 BT 都挤 uart6。
+> 官方 4.19 的 `qca,bt-reset-gpio=21` + `qca,bt-sw-ctrl-gpio=124` 在 mainline `qcom,qca6390-bt`
+> binding 里由 `enable-gpios` 表达，无需逐字照搬 BSP 私有 `qca,*` 属性。
+
 ## 待办 / 未迁移（后续批次）
 
-- **第二批**：PCIe(QCA6390 Wi-Fi/BT)、DPU/MDSS、DSI/panel、GPU
-- **第三批**：Audio、Touchscreen、Charging、Sensors、UDFPS 指纹
+- **第三批**：DPU/MDSS、DSI/panel、GPU、Audio、Touchscreen、Charging、Sensors、UDFPS 指纹
 - Camera：暂时后置，不作阻塞项
 
 ## Vendor 私有 property 待筛清单（重点）
