@@ -101,6 +101,17 @@
 		regulator-max-microvolt = <3700000>;
 	};
 
+	/*
+	 * 官方 4.19 throma j2nvtbm4n/j2gybm4n，4780mAh 双电芯六针。
+	 * 电量计为高通 fg-gen4（6.13 无 driver），Capacity 值先落 simple-battery。
+	 */
+	battery: battery {
+		compatible = "simple-battery";
+		charge-full-design-microamp-hours = <4780000>;
+		voltage-min-design-microvolt = <3870000>;
+		energy-full-design-microwatt-hours = <18400000>;
+	};
+
 	gpio_keys: gpio-keys {
 		compatible = "gpio-keys";
 

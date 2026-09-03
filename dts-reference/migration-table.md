@@ -199,10 +199,77 @@ Xiaomi Mi 10S（`thyme`，SM8250/Kona）Device Tree 迁移登记。
 > （panel-j2-mp-42-02-0b-dsc.c + binding yaml + Kconfig/Makefile）。
 > 6.13 里的 `boe,bf060y8m-aj0`（1080×2160）分辨率不符，**不能硬套**。
 
+## 十四、Audio
+
+| 项 | 官方 4.19 thyme | 6.13 driver | 状态 |
+|---|---|---|---|
+| codec | WCD938x（`wcd938x_rst_gpio`） | `wcd938x-sdw.c`/`wcd938x.c` | ✅ 可取 |
+| SoundWire | rx/tx/wsa 三组（bolero CDC） | `qcom,sm8250` soundwire 平台级 | ✅ 可取 |
+| 功放 | CS35L41 ×2（`cs35l41@40`/`@42`，cirrus） | `cs35l41-i2c.c` | ✅ 可取 |
+| 喇叭 | WSA 双喇叭（wsa_spkr_en1/2） | WSA macro 平台级 | ✅ 可取 |
+| MI2S/APR | BSP `qcom,msm-audio-apr` 私有 | ASoC `qcom,sm8250-sndcard` | 🔧 需改写 routing |
+
+> **结论**：thyme Audio 硬件（WCD938x + CS35L41 + SoundWire）6.13 driver 齐全，可迁移。
+> 需把 BSP `msm-audio-apr`/`bolero-cdc` 私有 routing 改成 6.13 ASoC 标准 dai-link。
+
+## 十五、Touchscreen
+
+| 项 | 官方 4.19 thyme | 6.13 | 状态 |
+|---|---|---|---|
+| goodix 方案 | `goodix@5d`（GT9886 + FOD 屏下指纹） | goodix.c **无 gt9886** | ❌ 6.13 缺失 |
+| fts 方案 | `qcom,i2c-touch-active="st,fts"`（@0x49） | 6.13 只有 `st,stmfts`（无 `st,fts`） | ❌ 6.13 缺失 |
+| 尺寸/位置 | FOD 参数一堆 | — | FOD 定制功能 |
+
+> **结论**：thyme 触摸双供应商（goodix GT9886 / st,fts），**6.13 均无对应 driver**。
+> 屏下指纹 FOD 是小米定制，主线 goodix 驱动不支持。→ **6.13 缺失 / 待 backport**。
+
+## 十六、Charging
+
+| 项 | 官方 4.19 thyme | 6.13 | 状态 |
+|---|---|---|---|
+| 主快充 | `ti,bq2597x-standalone` @0x66，irq=GPIO68 | `bq25970_charger.c`（`ti,bq2597x`） | ⚠️ 拓扑不同（thyme 单片 standalone，非 elish 双片） |
+| 恒流泵 | `halo,hl6111r` @0x25 | 无 driver | ❌ 缺失 |
+| 电荷泵 | SMB1390 主/从（`qcom,smb1390-slave`） | 无 mainline driver | ❌ 缺失 |
+| 电量计 | `qcom,fg-gen4`（高通内部 FG） | 无 driver（elish 用 bq27z561，thyme 实际非此） | ❌ 缺失 |
+| 无线充电 | `ln8282@55` + smb1355 + IDT p9415 | 无 driver | ❌ 缺失 |
+| 电池认证 | `maxim,ds28e16` | 无 driver | ❌ 缺失 |
+| 电池容量 | 4780mAh 双电芯六针（`nom-batt-capacity-mah=0x12ac`） | `simple-battery` | ✅ 容量值可取 |
+| PM8150B typec | SMB5 + typec/vbus | `pm8150b_typec`/`pm8150b_vbus` | ✅ 平台级 |
+
+> **关键差异**：thyme 充电拓扑（bq25970 standalone + smb1390 + hl6111r + ln8282 + fg-gen4）
+> 与 elish（bq27z561 + bq2597x master/slave）**不同**，大部分属 6.13 缺失，不可照搬 elish。
+> 仅电池容量值 + PM8150B typec 可落地。
+
+## 十七、Audio（补充精确拓扑）
+
+| 项 | 官方 4.19 thyme | 6.13 | 状态 |
+|---|---|---|---|
+| CS35L41 #1 | `cs35l41@40`，irq=GPIO113，reset=GPIO114 | `cirrus,cs35l41` | ✅ 可取（GPIO 精确到手） |
+| CS35L41 #2 | `cs35l41@42`，irq=GPIO112，reset=GPIO114 | `cirrus,cs35l41` | ✅ 可取 |
+| WCD938x reset | `msm_cdc_pinctrl@32`（私有，phandle 间接无 GPIO） | `wcd938x-sdw.c` | ⚠️ 完整 sound card 待下轮 |
+| WSA 喇叭 | `wsa_spkr_en1/2`（`msm-cdc-pinctrl` 私有） | WSA macro 平台级 | ⚠️ 待下轮 |
+| SoundWire | rx/tx/wsa（`bolero-cdc`） | `qcom,sm8250` swr | ⚠️ 待下轮改写 routing |
+
+> **结论**：thyme Audio codec/功放 driver 6.13 齐全，但完整 sound card 需把 BSP
+> `msm-audio-apr`/`bolero-cdc`/`msm-cdc-pinctrl` 私有 routing 改成 ASoC dai-link，
+> 且 WCD938x reset GPIO 在 BSP 里用 phandle 间接（无裸 GPIO 号），是下一轮单独攻 Audio 的内容。
+> 本批仅落地 CS35L41 双路（GPIO 已精确确认）。
+
+## 累计 6.13 缺失 / 需 backport 清单
+
+| 子项 | 状态 | 7.2 位置 |
+|---|---|---|
+| Panel `csot,j2-mp-42-02-0b-dsc` | 6.13 缺失 | panel-j2-mp-42-02-0b-dsc.c |
+| Touch goodix GT9886 / st,fts | 6.13 缺失 | drivers/input/touchscreen |
+| 无线充电 ln8282/p9415/smb1355 | 6.13 无 driver | — |
+| 恒流泵 hl6111r / 电荷泵 smb1390 | 6.13 无 driver | — |
+| 电量计 qcom fg-gen4 | 6.13 无 driver（非 bq27z561） | — |
+| 小米私有 cp-qc30/usbpd-pm/ds28e16 | 无 mainline 对应 | — |
+
 ## 待办 / 未迁移（后续批次）
 
-- **下一批**：Audio、Touchscreen、Charging、Sensors、UDFPS 指纹
-- **Panel driver backport**：`csot,j2-mp-42-02-0b-dsc`（7.2→6.13，需新增 driver）
+- **下一批**：Sensors、UDFPS 指纹
+- **Driver backport**：Panel / Touch / 无线充电（本阶段统一记录，暂不执行）
 - Camera：暂时后置，不作阻塞项
 
 ## Vendor 私有 property 待筛清单（重点）
