@@ -152,8 +152,8 @@ jobs:
       - name: Generate boot-thyme.img (header v2)
         run: |
           cd "$GITHUB_WORKSPACE"
-          # 诊断 cmdline：earlycon + 最高日志 + initcall 跟踪 + 保活，走 USB gadget
-          CMDLINE="console=ttyMSM0,115200n8 earlycon ignore_loglevel loglevel=8 initcall_debug clk_ignore_unused pd_ignore_unused rootwait panic=30"
+          # 诊断 cmdline：无 panic=30（避免 panic 强制重启干扰 hang 判断）；init 为最小保活，不碰 USB
+          CMDLINE="console=ttyMSM0,115200n8 earlycon ignore_loglevel loglevel=8 initcall_debug clk_ignore_unused pd_ignore_unused rootwait"
           python3 tools/mkbootimg.py \
             --header_version 2 \
             --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image.gz" \
