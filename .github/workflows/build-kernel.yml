@@ -22,11 +22,11 @@ jobs:
       - name: Install cross toolchain and build dependencies
         run: |
           sudo apt-get update
-          sudo DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          sudo apt-get install -y --no-install-recommends \
             build-essential libssl-dev libelf-dev flex bison bc rsync \
             python3 python3-pip python3-yaml \
             swig python3-dev \
-            gcc-aarch64-linux-gnu device-tree-compiler
+            gcc-aarch64-linux-gnu libc6-dev-arm64-cross device-tree-compiler
           # 内核 writing-schema 文档：dtschema 需 swig + Python 开发文件；
           # 升级 pip 后在隔离环境编译 pylibfdt；--break-system-packages 写系统 site，
           # 避免 GH runner 禁用 user-site 导致 import 失败
@@ -34,6 +34,10 @@ jobs:
           sudo python3 -m pip install --break-system-packages dtschema yamllint
           export PATH="$HOME/.local/bin:/usr/local/bin:$PATH"
           aarch64-linux-gnu-gcc --version | head -1
+          # 验证交叉 glibc 头文件就位（init.c 静态链接需要 aarch64 的 libc）
+          test -f /usr/aarch64-linux-gnu/include/bits/wordsize.h \
+            && echo "aarch64 cross glibc headers OK" \
+            || echo "WARN: libc6-dev-arm64-cross headers missing"
           python3 -m pip --version
           python3 -c "import libfdt, dtschema; print('libfdt+dtschema import OK')"
           dt-doc-validate --version
