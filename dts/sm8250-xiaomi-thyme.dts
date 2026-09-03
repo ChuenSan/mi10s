@@ -1,19 +1,22 @@
 // SPDX-License-Identifier: BSD-3-Clause
 /*
- * Xiaomi Mi 10S (thyme) — SM8250 (Kona)
+ * Xiaomi Mi 10S (thyme) — SM8250 (Kona v2.1)
  *
- * 最小可启动骨架（阶段 5）。
- * 结构参照主线 sm8250-xiaomi-elish-common.dtsi；thyme 特有值
- * 对照厂商 MiCode thyme-sm8250*.dtsi 与实机 runtime DTS 核对。
+ * 基于 Linux 6.13 sm8250 平台骨架，独立构建。
+ * 硬件事实来源：官方 4.19.157-perf 反编译树 dts-reference/thyme-official-full.dts。
+ * 组织方式参照 sm8250-xiaomi-elish-common.dtsi（同为 Xiaomi SM8250）。
  *
- * 未移植（后续阶段）：Display / Touchscreen / Camera / 完整 Audio /
- * UDFPS / 充电 / 传感器 / Wi-Fi BT。
+ * 首批迁移：基础平台 / reserved-memory / PMIC / UFS / USB / 基础 GPIO。
+ * 后续批次：PCIe(Wi-Fi/BT) / DPU·DSI / GPU / Audio / Touch / Charging / Sensors。
  */
 
 /dts-v1/;
 
 #include <dt-bindings/arm/qcom,ids.h>
+#include <dt-bindings/gpio/gpio.h>
 #include <dt-bindings/input/input.h>
+#include <dt-bindings/leds/common.h>
+#include <dt-bindings/phy/phy.h>
 #include <dt-bindings/regulator/qcom,rpmh-regulator.h>
 #include <dt-bindings/usb/pd.h>
 #include "sm8250.dtsi"
@@ -23,8 +26,8 @@
 #include "pm8009.dtsi"
 
 /*
- * 以下 reserved-memory 与主线 sm8250.dtsi 默认值不同，
- * thyme 与 elish 同为 xiaomi SM8250，布局一致。
+ * thyme 与 elish 同为 Xiaomi SM8250，reserved-memory 布局一致，
+ * 且均与上游 sm8250.dtsi 默认值不同，故删除后按官方 4.19 值重定义。
  */
 /delete-node/ &adsp_mem;
 /delete-node/ &cdsp_secure_heap;
@@ -37,7 +40,7 @@
 	compatible = "xiaomi,thyme", "qcom,sm8250";
 	chassis-type = "handset";
 
-	/* bootloader 选板依据 */
+	/* bootloader 选板依据（官方 4.19：msm-id 0x164/board-id 0x2d） */
 	qcom,msm-id = <QCOM_ID_SM8250 0x20001>; /* SM8250 v2.1 */
 	qcom,board-id = <45 0>;
 
@@ -49,13 +52,11 @@
 		stdout-path = "serial0:115200n8";
 	};
 
-	/* 12GB LPDDR5 (厂商 runtime DTS 三段布局) */
-	memory@80000000 {
-		device_type = "memory";
-		reg = <0x0 0x80000000 0x0 0x39900000>,
-		      <0x2 0x00000000 0x1 0x80000000>,
-		      <0x0 0xc0000000 0x1 0x40000000>;
-	};
+	/*
+	 * 内存布局由 bootloader 运行时填充（官方 4.19 静态 reg 为占位 0，
+	 * 6.13 sm8250.dtsi 默认 memory@80000000 同样 size=0，由 BL 填 size）。
+	 * 故不在此声明 memory，直接继承 6.13 基座的 bootloader-fill 语义。
+	 */
 
 	reserved-memory {
 		xbl_aop_mem: xbl-aop@80600000 {
@@ -100,28 +101,26 @@
 		regulator-max-microvolt = <3700000>;
 	};
 
-	/* S6c 实为 ebi.lvl，仅为补齐 supply map */
-	vreg_s6c_0p88: smpc6-regulator {
-		compatible = "regulator-fixed";
-		regulator-name = "vreg_s6c_0p88";
-		regulator-min-microvolt = <880000>;
-		regulator-max-microvolt = <880000>;
-		regulator-always-on;
-		vin-supply = <&vph_pwr>;
-	};
-
-	gpio-keys {
+	gpio_keys: gpio-keys {
 		compatible = "gpio-keys";
 
-		vol-up {
+		pinctrl-names = "default";
+		pinctrl-0 = <&vol_up_n>;
+
+		key-vol-up {
 			label = "Volume Up";
 			gpios = <&pm8150_gpios 6 GPIO_ACTIVE_LOW>;
-			linux,input-type = <1>;
 			linux,code = <KEY_VOLUMEUP>;
 			debounce-interval = <15>;
+			linux,can-disable;
 			wakeup-source;
 		};
 	};
+};
+
+&adsp {
+	status = "okay";
+	firmware-name = "qcom/sm8250/xiaomi/thyme/adsp.mbn";
 };
 
 &apps_rsc {
@@ -129,45 +128,23 @@
 		compatible = "qcom,pm8150-rpmh-regulators";
 		qcom,pmic-id = "a";
 
-		vdd-s1-supply = <&vph_pwr>;
-		vdd-s2-supply = <&vph_pwr>;
-		vdd-s3-supply = <&vph_pwr>;
-		vdd-s4-supply = <&vph_pwr>;
-		vdd-s5-supply = <&vph_pwr>;
-		vdd-s6-supply = <&vph_pwr>;
-		vdd-s7-supply = <&vph_pwr>;
-		vdd-s8-supply = <&vph_pwr>;
-		vdd-s9-supply = <&vph_pwr>;
-		vdd-s10-supply = <&vph_pwr>;
-		vdd-l1-l8-l11-supply = <&vreg_s6c_0p88>;
-		vdd-l2-l10-supply = <&vreg_bob>;
-		vdd-l3-l4-l5-l18-supply = <&vreg_s6a_0p95>;
-		vdd-l6-l9-supply = <&vreg_s8c_1p35>;
-		vdd-l7-l12-l14-l15-supply = <&vreg_s5a_1p9>;
-		vdd-l13-l16-l17-supply = <&vreg_bob>;
-
-		/* (S1+S2+S3) - cx.lvl (ARC) */
-
 		vreg_s4a_1p8: smps4 {
 			regulator-name = "vreg_s4a_1p8";
 			regulator-min-microvolt = <1800000>;
 			regulator-max-microvolt = <1920000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
-			regulator-allow-set-load;
-			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
-						   RPMH_REGULATOR_MODE_HPM>;
 		};
 
 		vreg_s5a_1p9: smps5 {
 			regulator-name = "vreg_s5a_1p9";
-			regulator-min-microvolt = <1900000>;
+			regulator-min-microvolt = <1824000>;
 			regulator-max-microvolt = <2040000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
 		vreg_s6a_0p95: smps6 {
 			regulator-name = "vreg_s6a_0p95";
-			regulator-min-microvolt = <950000>;
+			regulator-min-microvolt = <600000>;
 			regulator-max-microvolt = <1128000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
@@ -186,8 +163,6 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		/* L4 - lmx.lvl (ARC) */
-
 		vreg_l5a_0p88: ldo5 {
 			regulator-name = "vreg_l5a_0p88";
 			regulator-min-microvolt = <880000>;
@@ -200,12 +175,7 @@
 			regulator-min-microvolt = <1200000>;
 			regulator-max-microvolt = <1200000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
-			regulator-allow-set-load;
-			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
-						   RPMH_REGULATOR_MODE_HPM>;
 		};
-
-		/* L7 is unused. */
 
 		vreg_l9a_1p2: ldo9 {
 			regulator-name = "vreg_l9a_1p2";
@@ -214,8 +184,6 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		/* L10 is unused, L11 - lcx.lvl (ARC) */
-
 		vreg_l12a_1p8: ldo12 {
 			regulator-name = "vreg_l12a_1p8";
 			regulator-min-microvolt = <1800000>;
@@ -223,80 +191,77 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		/* L13 is unused. */
-
 		vreg_l14a_1p88: ldo14 {
 			regulator-name = "vreg_l14a_1p88";
-			regulator-min-microvolt = <1880000>;
+			regulator-min-microvolt = <1800000>;
 			regulator-max-microvolt = <1880000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
-
-		/* L15 & L16 are unused. */
 
 		vreg_l17a_3p0: ldo17 {
 			regulator-name = "vreg_l17a_3p0";
 			regulator-min-microvolt = <2496000>;
 			regulator-max-microvolt = <3008000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
-			regulator-allow-set-load;
-			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
-						   RPMH_REGULATOR_MODE_HPM>;
 		};
 
 		vreg_l18a_0p9: ldo18 {
 			regulator-name = "vreg_l18a_0p9";
-			regulator-min-microvolt = <800000>;
-			regulator-max-microvolt = <920000>;
+			regulator-min-microvolt = <912000>;
+			regulator-max-microvolt = <912000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l7a_1p8: ldo7 {
+			regulator-name = "vreg_l7a_1p8";
+			regulator-min-microvolt = <1704000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l10a_1p8: ldo10 {
+			regulator-name = "vreg_l10a_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <2960000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l13a_3p0: ldo13 {
+			regulator-name = "vreg_l13a_3p0";
+			regulator-min-microvolt = <3008000>;
+			regulator-max-microvolt = <3008000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l15a_1p8: ldo15 {
+			regulator-name = "vreg_l15a_1p8";
+			regulator-min-microvolt = <1800000>;
+			regulator-max-microvolt = <1800000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l16a_3p0: ldo16 {
+			regulator-name = "vreg_l16a_3p0";
+			regulator-min-microvolt = <3024000>;
+			regulator-max-microvolt = <3304000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 	};
 
-	/*
-	 * 未支持的 regulator：OLEDB / ab / ibb。
-	 */
 	regulators-1 {
 		compatible = "qcom,pm8150l-rpmh-regulators";
 		qcom,pmic-id = "c";
 
-		vdd-s1-supply = <&vph_pwr>;
-		vdd-s2-supply = <&vph_pwr>;
-		vdd-s3-supply = <&vph_pwr>;
-		vdd-s4-supply = <&vph_pwr>;
-		vdd-s5-supply = <&vph_pwr>;
-		vdd-s6-supply = <&vph_pwr>;
-		vdd-s7-supply = <&vph_pwr>;
-		vdd-s8-supply = <&vph_pwr>;
-		vdd-l1-l8-supply = <&vreg_s4a_1p8>;
-		vdd-l2-l3-supply = <&vreg_s8c_1p35>;
-		vdd-l4-l5-l6-supply = <&vreg_bob>;
-		vdd-l7-l11-supply = <&vreg_bob>;
-		vdd-l9-l10-supply = <&vreg_bob>;
-		vdd-bob-supply = <&vph_pwr>;
-
 		vreg_bob: bob {
 			regulator-name = "vreg_bob";
-			regulator-min-microvolt = <3350000>;
+			regulator-min-microvolt = <3008000>;
 			regulator-max-microvolt = <3960000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_AUTO>;
 		};
 
-		/*
-		 * S1-S6 是 ARC：
-		 * (S1+S2) - gfx.lvl, S3 - mx.lvl,
-		 * (S4+S5) - mmcx.lvl, S6 - ebi.lvl
-		 */
-
-		vreg_s7c_0p35: smps7 {
-			regulator-name = "vreg_s7c_0p35";
-			regulator-min-microvolt = <348000>;
-			regulator-max-microvolt = <1000000>;
-			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
-		};
-
 		vreg_s8c_1p35: smps8 {
 			regulator-name = "vreg_s8c_1p35";
-			regulator-min-microvolt = <1350000>;
+			regulator-min-microvolt = <1200000>;
 			regulator-max-microvolt = <1400000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
@@ -307,8 +272,6 @@
 			regulator-max-microvolt = <1800000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
-
-		/* L2-4 are unused. */
 
 		vreg_l5c_1p8: ldo5 {
 			regulator-name = "vreg_l5c_1p8";
@@ -322,9 +285,6 @@
 			regulator-min-microvolt = <1800000>;
 			regulator-max-microvolt = <2960000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
-			regulator-allow-set-load;
-			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
-						   RPMH_REGULATOR_MODE_HPM>;
 		};
 
 		vreg_l7c_2p85: ldo7 {
@@ -346,22 +306,19 @@
 			regulator-min-microvolt = <2704000>;
 			regulator-max-microvolt = <2960000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
-			regulator-allow-set-load;
-			regulator-allowed-modes = <RPMH_REGULATOR_MODE_LPM
-						   RPMH_REGULATOR_MODE_HPM>;
 		};
 
 		vreg_l10c_3p3: ldo10 {
 			regulator-name = "vreg_l10c_3p3";
-			regulator-min-microvolt = <3296000>;
-			regulator-max-microvolt = <3296000>;
+			regulator-min-microvolt = <3000000>;
+			regulator-max-microvolt = <3312000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
 		vreg_l11c_3p0: ldo11 {
 			regulator-name = "vreg_l11c_3p0";
 			regulator-min-microvolt = <3000000>;
-			regulator-max-microvolt = <3000000>;
+			regulator-max-microvolt = <3312000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 	};
@@ -370,16 +327,10 @@
 		compatible = "qcom,pm8009-rpmh-regulators";
 		qcom,pmic-id = "f";
 
-		vdd-s1-supply = <&vph_pwr>;
-		vdd-s2-supply = <&vreg_bob>;
-		vdd-l2-supply = <&vreg_s8c_1p35>;
-		vdd-l5-l6-supply = <&vreg_bob>;
-		vdd-l7-supply = <&vreg_s4a_1p8>;
-
 		vreg_s1f_1p2: smps1 {
 			regulator-name = "vreg_s1f_1p2";
 			regulator-min-microvolt = <1200000>;
-			regulator-max-microvolt = <1200000>;
+			regulator-max-microvolt = <1300000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
@@ -390,28 +341,45 @@
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		/* L1 is unused. */
-
-		vreg_l2f_1p3: ldo2 {
-			regulator-name = "vreg_l2f_1p3";
-			regulator-min-microvolt = <1304000>;
-			regulator-max-microvolt = <1304000>;
+		vreg_l1f_1p1: ldo1 {
+			regulator-name = "vreg_l1f_1p1";
+			regulator-min-microvolt = <1104000>;
+			regulator-max-microvolt = <1104000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
-		/* L3 & L4 are unused. */
+		vreg_l2f_1p3: ldo2 {
+			regulator-name = "vreg_l2f_1p3";
+			regulator-min-microvolt = <1056000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
 
-		vreg_l5f_2p85: ldo5 {
-			regulator-name = "vreg_l5f_2p85";
+		vreg_l3f_1p2: ldo3 {
+			regulator-name = "vreg_l3f_1p2";
+			regulator-min-microvolt = <1056000>;
+			regulator-max-microvolt = <1200000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l4f_1p1: ldo4 {
+			regulator-name = "vreg_l4f_1p1";
+			regulator-min-microvolt = <1104000>;
+			regulator-max-microvolt = <1104000>;
+			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
+		};
+
+		vreg_l5f_2p8: ldo5 {
+			regulator-name = "vreg_l5f_2p8";
 			regulator-min-microvolt = <2800000>;
-			regulator-max-microvolt = <2800000>;
+			regulator-max-microvolt = <3000000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
 		vreg_l6f_2p8: ldo6 {
 			regulator-name = "vreg_l6f_2p8";
 			regulator-min-microvolt = <2800000>;
-			regulator-max-microvolt = <2800000>;
+			regulator-max-microvolt = <3000000>;
 			regulator-initial-mode = <RPMH_REGULATOR_MODE_HPM>;
 		};
 
@@ -424,16 +392,22 @@
 	};
 };
 
-&pon_pwrkey {
-	status = "okay";
+&pm8150_gpios {
+	vol_up_n: vol-up-n-state {
+		pins = "gpio6";
+		function = "normal";
+		input-enable;
+		bias-pull-up;
+		power-source = <1>;
+	};
 };
 
 &pon_resin {
-	linux,code = <KEY_VOLUMEDOWN>;
 	status = "okay";
+	linux,code = <KEY_VOLUMEDOWN>;
 };
 
-&uart2 {
+&pon_pwrkey {
 	status = "okay";
 };
 
@@ -454,78 +428,54 @@
 };
 
 &usb_1 {
-	/* USB 2.0 优先；主线固件先按 high-speed 走 */
-	qcom,select-utmi-as-pipe-clk;
 	status = "okay";
 };
 
 &usb_1_dwc3 {
-	/*
-	 * 参照主线 sm8250-xiaomi-elish-common.dtsi（已在主线跑通）：
-	 * USB2.0 only 下必须 dr_mode="otg"（不是 drd）。
-	 * drd 会强制走 dual-role 完整初始化，缺 USB3 phy 时崩溃（花屏闪关机）。
-	 * otg + usb-role-switch 在 DWC3 >=3.30a 下默认从 peripheral 起步并注册 UDC，
-	 * 仍能枚举 gadget。
-	 */
 	dr_mode = "otg";
+	/* 官方 4.19 thyme usb0 = USB 2.0 only */
 	maximum-speed = "high-speed";
-	/* 去除 USB3 phy */
 	phys = <&usb_1_hsphy>;
 	phy-names = "usb2-phy";
-	usb-role-switch;
 };
 
 &usb_1_hsphy {
+	status = "okay";
+
 	vdda-pll-supply = <&vreg_l5a_0p88>;
-	vdda18-supply = <&vreg_l12a_1p8>;
 	vdda33-supply = <&vreg_l2a_3p1>;
+	vdda18-supply = <&vreg_l12a_1p8>;
+};
+
+/* usb_1_qmpphy（combo DP phy）供 DP 视频输出，USB 数据仍走 HS */
+&usb_1_qmpphy {
+	status = "okay";
+
+	vdda-phy-supply = <&vreg_l9a_1p2>;
+	vdda-pll-supply = <&vreg_l18a_0p9>;
+};
+
+&usb_2 {
 	status = "okay";
 };
 
-&usb_1_dwc3_hs_out {
-	remote-endpoint = <&pm8150b_hs_in>;
+&usb_2_dwc3 {
+	dr_mode = "host";
+	/* 官方 4.19 thyme usb1 = USB 3.0 super-speed */
+	maximum-speed = "super-speed";
 };
 
-&pm8150b_typec {
-	vdd-pdphy-supply = <&vreg_l2a_3p1>;
+&usb_2_hsphy {
 	status = "okay";
 
-	connector {
-		compatible = "usb-c-connector";
-
-		op-sink-microwatt = <10000000>;
-		power-role = "dual";
-		data-role = "dual";
-		self-powered;
-
-		source-pdos = <PDO_FIXED(5000, 3000,
-					 PDO_FIXED_DUAL_ROLE |
-					 PDO_FIXED_USB_COMM |
-					 PDO_FIXED_DATA_SWAP)>;
-
-		sink-pdos = <PDO_FIXED(5000, 3000,
-				       PDO_FIXED_DUAL_ROLE |
-				       PDO_FIXED_USB_COMM |
-				       PDO_FIXED_DATA_SWAP)
-			     PDO_VAR(5000, 12000, 5000)>;
-
-		ports {
-			#address-cells = <1>;
-			#size-cells = <0>;
-
-			port@0 {
-				reg = <0>;
-
-				pm8150b_hs_in: endpoint {
-					remote-endpoint = <&usb_1_dwc3_hs_out>;
-				};
-			};
-		};
-	};
+	vdda-pll-supply = <&vreg_l5a_0p88>;
+	vdda33-supply = <&vreg_l2a_3p1>;
+	vdda18-supply = <&vreg_l12a_1p8>;
 };
 
-&pm8150b_vbus {
-	regulator-min-microamp = <500000>;
-	regulator-max-microamp = <3000000>;
+&usb_2_qmpphy {
 	status = "okay";
+
+	vdda-phy-supply = <&vreg_l9a_1p2>;
+	vdda-pll-supply = <&vreg_l18a_0p9>;
 };
