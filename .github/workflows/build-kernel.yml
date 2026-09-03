@@ -121,18 +121,24 @@ jobs:
 
       - name: Fetch AOSP mkbootimg tools
         run: |
-          # 官方 Android boot image 工具（header v2 支持 DTB 字段），取 GitHub 镜像原始文件
-          curl -fsSL -o "$GITHUB_WORKSPACE/mkbootimg.py" \
-            https://raw.githubusercontent.com/aosp-mirror/platform_system_tools_mkbootimg/master/mkbootimg.py
-          curl -fsSL -o "$GITHUB_WORKSPACE/unpack_bootimg.py" \
-            https://raw.githubusercontent.com/aosp-mirror/platform_system_tools_mkbootimg/master/unpack_bootimg.py
-          ls -l "$GITHUB_WORKSPACE/mkbootimg.py" "$GITHUB_WORKSPACE/unpack_bootimg.py"
-          python3 "$GITHUB_WORKSPACE/mkbootimg.py" --help 2>&1 | head -20
+          # 官方 Android boot image 工具（header v2 支持 DTB 字段）。
+          # googlesource 无 GitHub 镜像，用 ?format=TEXT 接口（base64）解码落地。
+          # master 的 mkbootimg.py 会 `from gki.generate_gki_certificate import ...`，
+          # 故需一并拉取 gki 子模块并建成包（仅标准库依赖）。
+          GS="https://android.googlesource.com/platform/system/tools/mkbootimg/+/refs/heads/master"
+          mkdir -p "$GITHUB_WORKSPACE/tools/gki"
+          curl -fsSL "${GS}/mkbootimg.py?format=TEXT" | base64 -d > "$GITHUB_WORKSPACE/tools/mkbootimg.py"
+          curl -fsSL "${GS}/unpack_bootimg.py?format=TEXT" | base64 -d > "$GITHUB_WORKSPACE/tools/unpack_bootimg.py"
+          curl -fsSL "${GS}/gki/generate_gki_certificate.py?format=TEXT" | base64 -d > "$GITHUB_WORKSPACE/tools/gki/generate_gki_certificate.py"
+          : > "$GITHUB_WORKSPACE/tools/gki/__init__.py"
+          chmod +x "$GITHUB_WORKSPACE/tools/mkbootimg.py" "$GITHUB_WORKSPACE/tools/unpack_bootimg.py"
+          ls -lR "$GITHUB_WORKSPACE/tools"
+          python3 "$GITHUB_WORKSPACE/tools/mkbootimg.py" --help 2>&1 | head -20
 
       - name: Generate boot-thyme.img (header v2)
         run: |
           cd "$GITHUB_WORKSPACE"
-          python3 mkbootimg.py \
+          python3 tools/mkbootimg.py \
             --header_version 2 \
             --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image.gz" \
             --ramdisk initramfs/initramfs.cpio.gz \
@@ -152,7 +158,7 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE"
           rm -rf unpack && mkdir unpack
-          python3 unpack_bootimg.py \
+          python3 tools/unpack_bootimg.py \
             --boot_img boot-thyme.img \
             --out unpack \
             --format mkbootimg > unpack/verify.sh
