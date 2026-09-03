@@ -96,6 +96,7 @@ jobs:
             --enable  CONFIG_DRM \
             --enable  CONFIG_DRM_KMS_HELPER \
             --enable  CONFIG_DRM_DISPLAY_HELPER \
+            --enable  CONFIG_DRM_DISPLAY_DSC_HELPER \
             --enable  CONFIG_DRM_MSM \
             --enable  CONFIG_DRM_PANEL \
             --enable  CONFIG_DRM_MIPI_DSI \
