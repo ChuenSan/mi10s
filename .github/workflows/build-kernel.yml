@@ -95,6 +95,12 @@ jobs:
             --disable CONFIG_FB_EFI \
             --enable  CONFIG_NLS_ASCII \
             --enable  CONFIG_KALLSYMS
+          # --- 无串口下的临终日志：ramoops 内置 + 持续 mirror console ---
+          # PSTORE_RAM=m 在 initramfs 下永远不加载，DT ramoops@b0000000 无 driver 匹配；
+          # PSTORE_CONSOLE 实时镜像 kernel log 到保留内存，hang 前最后的日志得以回 A 槽读取。
+          scripts/config \
+            --enable  CONFIG_PSTORE_RAM \
+            --enable  CONFIG_PSTORE_CONSOLE
           make olddefconfig
 
       - name: Build kernel image + dtbs
@@ -153,7 +159,7 @@ jobs:
         run: |
           cd "$GITHUB_WORKSPACE"
           # 诊断 cmdline：无 panic=30（避免 panic 强制重启干扰 hang 判断）；init 为最小保活，不碰 USB
-          CMDLINE="console=ttyMSM0,115200n8 earlycon ignore_loglevel loglevel=8 initcall_debug clk_ignore_unused pd_ignore_unused rootwait"
+          CMDLINE="console=ttyMSM0,115200n8 earlycon ignore_loglevel loglevel=8 initcall_debug clk_ignore_unused pd_ignore_unused rootwait printk.always_kmsg_dump"
           python3 tools/mkbootimg.py \
             --header_version 2 \
             --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image.gz" \
