@@ -35,6 +35,8 @@ config DRM_PANEL_CSOT_MP42020B
 	depends on OF
 	depends on DRM_MIPI_DSI
 	depends on BACKLIGHT_CLASS_DEVICE
+	select DRM_DISPLAY_DSC_HELPER
+	select DRM_DISPLAY_HELPER
 	help
 	  Say Y here to enable support for the CSOT J2 MP 42 02 0B
 	  6.67" 1080x2340 AMOLED command mode panel with DSC 1.1

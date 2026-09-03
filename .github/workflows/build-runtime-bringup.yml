@@ -56,58 +56,24 @@ jobs:
           export ARCH=arm64
           export CROSS_COMPILE=aarch64-linux-gnu-
           make defconfig
-          # 基础平台 + 启动
-          scripts/config \
-            --enable  CONFIG_ARCH_QCOM \
-            --enable  CONFIG_EFI_STUB \
-            --enable  CONFIG_DEVTMPFS \
-            --enable  CONFIG_DEVTMPFS_MOUNT \
-            --enable  CONFIG_TMPFS \
-            --enable  CONFIG_PROC_FS \
-            --enable  CONFIG_SYSFS
-          # UFS 存储
-          scripts/config \
-            --enable  CONFIG_SCSI \
-            --enable  CONFIG_SCSI_UFSHCD \
-            --enable  CONFIG_SCSI_UFSHCD_PLATFORM \
-            --enable  CONFIG_SCSI_UFS_QCOM \
-            --enable  CONFIG_PHY_QCOM_QMP_UFS \
-            --enable  CONFIG_PHY_QCOM_QUSB2
-          # USB DWC3 + gadget 全链路（=y，无模块）
-          scripts/config \
-            --enable  CONFIG_USB \
-            --enable  CONFIG_USB_DWC3 \
-            --enable  CONFIG_USB_DWC3_QCOM \
-            --enable  CONFIG_USB_DWC3_DUAL_ROLE \
-            --enable  CONFIG_USB_XHCI_HCD \
-            --enable  CONFIG_USB_CONFIGFS \
-            --enable  CONFIG_USB_LIBCOMPOSITE \
-            --enable  CONFIG_USB_F_ACM \
-            --enable  CONFIG_USB_U_SERIAL \
-            --enable  CONFIG_USB_F_ECM \
-            --enable  CONFIG_USB_U_ETHER \
-            --enable  CONFIG_USB_GADGET \
-            --enable  CONFIG_USB_OTG \
-            --enable  CONFIG_USB_ROLE_SWITCH \
-            --enable  CONFIG_USB_CONFIGFS_SERIAL \
-            --enable  CONFIG_USB_CONFIGFS_ECM
-          # Display / Panel (built-in)
-          scripts/config \
-            --enable  CONFIG_DRM \
-            --enable  CONFIG_DRM_KMS_HELPER \
-            --enable  CONFIG_DRM_DISPLAY_HELPER \
-            --enable  CONFIG_DRM_DISPLAY_DSC_HELPER \
-            --enable  CONFIG_DRM_MSM \
-            --enable  CONFIG_DRM_PANEL \
-            --enable  CONFIG_DRM_MIPI_DSI \
-            --enable  CONFIG_BACKLIGHT_CLASS_DEVICE \
-            --enable  CONFIG_DRM_PANEL_CSOT_MP42020B
-          # 调试
-          scripts/config \
-            --enable  CONFIG_KALLSYMS \
-            --enable  CONFIG_PRINTK \
-            --enable  CONFIG_DYNAMIC_DEBUG
+          # 用 fragment 合并（替代连续 scripts/config --enable）
+          scripts/kconfig/merge_config.sh -m "$GITHUB_WORKSPACE/configs/thyme-bringup.config"
           make olddefconfig
+
+      - name: Config assertion (fail-fast)
+        run: |
+          cd "$HOME/linux-sm8250"
+          echo "=== final config 值 ==="
+          for c in DRM DRM_KMS_HELPER DRM_DISPLAY_HELPER DRM_DISPLAY_DSC_HELPER \
+                   DRM_MIPI_DSI DRM_PANEL DRM_MSM DRM_PANEL_CSOT_MP42020B; do
+            v=$(grep -E "^CONFIG_${c}=" .config || echo "CONFIG_${c}=<missing>")
+            echo "$v"
+          done
+          # 关键 config 必须 =y，否则 fail-fast
+          for c in DRM DRM_MSM DRM_PANEL DRM_PANEL_CSOT_MP42020B; do
+            grep -qE "^CONFIG_${c}=y$" .config || { echo "FAIL: CONFIG_${c} 非 y"; exit 1; }
+          done
+          echo "config preflight OK"
 
       - name: Build kernel + dtbs
         run: |
