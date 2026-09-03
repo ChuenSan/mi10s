@@ -94,11 +94,12 @@ jobs:
           # Display / Panel (built-in)
           scripts/config \
             --enable  CONFIG_DRM \
+            --enable  CONFIG_DRM_KMS_HELPER \
+            --enable  CONFIG_DRM_DISPLAY_HELPER \
             --enable  CONFIG_DRM_MSM \
             --enable  CONFIG_DRM_PANEL \
             --enable  CONFIG_DRM_MIPI_DSI \
             --enable  CONFIG_BACKLIGHT_CLASS_DEVICE \
-            --enable  CONFIG_DRM_DSC_HELPER \
             --enable  CONFIG_DRM_PANEL_CSOT_MP42020B
           # 调试
           scripts/config \
