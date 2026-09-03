@@ -657,6 +657,7 @@
 		compatible = "csot,j2-mp-42-02-0b-dsc";
 		vddio-supply = <&vreg_l14a_1p88>;
 		reset-gpios = <&tlmm 12 GPIO_ACTIVE_LOW>;
+		disprate-gpios = <&tlmm 50 GPIO_ACTIVE_HIGH>;
 
 		status = "okay";
 

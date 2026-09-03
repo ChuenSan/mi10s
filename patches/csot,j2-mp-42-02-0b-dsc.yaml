@@ -1,0 +1,70 @@
+# SPDX-License-Identifier: (GPL-2.0-only OR BSD-2-Clause)
+%YAML 1.2
+---
+$id: http://devicetree.org/schemas/display/panel/csot,j2-mp-42-02-0b-dsc.yaml#
+$schema: http://devicetree.org/meta-schemas/core.yaml#
+
+title: CSOT J2 MP 42 02 0B 6.67" 1080x2340 DSC AMOLED Panel
+
+maintainers:
+  - Xiaomi Mi 10S (thyme) porting
+
+description: |
+  CSOT (China Star Optoelectronics) J2 MP 42 02 0B panel: a 6.67"
+  1080x2340 active matrix AMOLED command-mode panel on MIPI-DSI
+  4-lane interface with DSC 1.1 compression. Used on Xiaomi Mi 10S
+  (thyme) and Mi 10 (umi) SM8250 devices. DriverIC SW43404 family.
+
+allOf:
+  - $ref: panel-common.yaml#
+
+properties:
+  compatible:
+    const: csot,j2-mp-42-02-0b-dsc
+
+  reg:
+    maxItems: 1
+
+  vddio-supply:
+    description: I/O voltage supply
+
+  reset-gpios:
+    description: Panel reset GPIO (active high)
+    maxItems: 1
+
+  disprate-gpios:
+    description: Display rate switch GPIO
+    maxItems: 1
+
+  port: true
+
+required:
+  - compatible
+  - reg
+  - vddio-supply
+  - reset-gpios
+
+additionalProperties: false
+
+examples:
+  - |
+    dsi {
+        #address-cells = <1>;
+        #size-cells = <0>;
+
+        panel@0 {
+            compatible = "csot,j2-mp-42-02-0b-dsc";
+            reg = <0>;
+            vddio-supply = <&vreg_l14a_1p8>;
+            reset-gpios = <&tlmm 12 GPIO_ACTIVE_HIGH>;
+            disprate-gpios = <&tlmm 50 GPIO_ACTIVE_HIGH>;
+
+            port {
+                panel_in: endpoint {
+                    remote-endpoint = <&dsi_out>;
+                };
+            };
+        };
+    };
+
+...

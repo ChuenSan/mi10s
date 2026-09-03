@@ -1,0 +1,119 @@
+name: build-integration-panel
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [ main ]
+    paths:
+      - 'patches/**'
+      - '.github/workflows/build-integration.yml'
+
+jobs:
+  build:
+    name: Panel backport integration (thyme)
+    runs-on: ubuntu-22.04
+    timeout-minutes: 180
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Install cross toolchain and build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential libssl-dev libelf-dev flex bison bc rsync \
+            python3 python3-pip python3-yaml \
+            swig python3-dev \
+            gcc-aarch64-linux-gnu device-tree-compiler
+          sudo python3 -m pip install --upgrade pip setuptools wheel
+          sudo python3 -m pip install --break-system-packages dtschema yamllint
+          aarch64-linux-gnu-gcc --version | head -1
+          python3 -c "import libfdt, dtschema; print('libfdt+dtschema import OK')"
+
+      - name: Clone sm8250-mainline Linux kernel
+        run: |
+          git clone --depth=1 -b sm8250/v6.13 \
+            https://gitlab.com/sm8250-mainline/linux.git \
+            "$HOME/linux-sm8250"
+          cd "$HOME/linux-sm8250"
+          git rev-parse HEAD > "$GITHUB_WORKSPACE/kernel-commit.txt"
+          git log -1 --format='%s' >> "$GITHUB_WORKSPACE/kernel-commit.txt"
+
+      - name: Inject thyme DTS + panel backport
+        run: |
+          bash "$GITHUB_WORKSPACE/scripts/inject-thyme-dts.sh" "$HOME/linux-sm8250"
+          bash "$GITHUB_WORKSPACE/scripts/inject-panel-backport.sh" "$HOME/linux-sm8250"
+
+      - name: Configure kernel (panel + DRM + DSI)
+        run: |
+          cd "$HOME/linux-sm8250"
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make defconfig
+          scripts/config \
+            --enable  CONFIG_ARCH_QCOM \
+            --enable  CONFIG_DRM \
+            --enable  CONFIG_DRM_MSM \
+            --enable  CONFIG_DRM_PANEL \
+            --enable  CONFIG_DRM_MIPI_DSI \
+            --enable  CONFIG_BACKLIGHT_CLASS_DEVICE \
+            --enable  CONFIG_DRM_PANEL_CSOT_MP42020B \
+            --module  CONFIG_DRM_PANEL_CSOT_MP42020B \
+            --enable  CONFIG_SCSI_UFSHCD \
+            --enable  CONFIG_SCSI_UFSHCD_PLATFORM \
+            --enable  CONFIG_SCSI_UFS_QCOM \
+            --enable  CONFIG_PHY_QCOM_QMP_UFS
+          # panel 是 DSC cmd mode，依赖 DRM_DSC helper
+          scripts/config --enable CONFIG_DRM_DSC_HELPER
+          make olddefconfig
+
+      - name: Build kernel + panel driver + dtbs
+        run: |
+          cd "$HOME/linux-sm8250"
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make -j"$(nproc)" dtbs 2>&1 | tee "$GITHUB_WORKSPACE/dtbs-build.log"
+          # 显式编译 panel driver 目标，确认成功参与编译
+          make -j"$(nproc)" drivers/gpu/drm/panel/panel-j2-mp-42-02-0b-dsc.o 2>&1 | tee "$GITHUB_WORKSPACE/panel-build.log"
+
+      - name: Verify panel driver object built
+        run: |
+          cd "$HOME/linux-sm8250"
+          test -f drivers/gpu/drm/panel/panel-j2-mp-42-02-0b-dsc.o \
+            && echo "panel-j2-mp-42-02-0b-dsc.o 生成成功" \
+            || { echo "FAIL: panel driver 未编译"; exit 1; }
+
+      - name: Verify thyme DTB
+        run: |
+          cd "$HOME/linux-sm8250"
+          DTB=arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb
+          ls -l "$DTB"
+          test -s "$DTB"
+          dtc -I dtb -O dts -o "$GITHUB_WORKSPACE/sm8250-xiaomi-thyme.dts" "$DTB"
+
+      - name: Run dtbs_check (thyme)
+        run: |
+          cd "$HOME/linux-sm8250"
+          export PATH="/usr/local/bin:$PATH"
+          export ARCH=arm64
+          export CROSS_COMPILE=aarch64-linux-gnu-
+          make CHECK_DTBS=y W=1 qcom/sm8250-xiaomi-thyme.dtb 2>&1 | tee "$GITHUB_WORKSPACE/dtbs-check.log" || true
+          grep -iE 'sm8250-xiaomi-thyme|csot,j2-mp' "$GITHUB_WORKSPACE/dtbs-check.log" || echo "(无 thyme/panel 相关 warning)"
+
+      - name: Stage artifacts for upload
+        run: |
+          mkdir -p "$GITHUB_WORKSPACE/dist"
+          cp "$HOME/linux-sm8250/drivers/gpu/drm/panel/panel-j2-mp-42-02-0b-dsc.o" "$GITHUB_WORKSPACE/dist/" || true
+          cp "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" "$GITHUB_WORKSPACE/dist/"
+          cp "$GITHUB_WORKSPACE/panel-build.log" "$GITHUB_WORKSPACE/dist/" || true
+          cp "$GITHUB_WORKSPACE/dtbs-build.log" "$GITHUB_WORKSPACE/dist/" || true
+          cp "$GITHUB_WORKSPACE/dtbs-check.log" "$GITHUB_WORKSPACE/dist/" || true
+          ls -l "$GITHUB_WORKSPACE/dist"
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: thyme-panel-integration
+          path: dist/
+          if-no-files-found: error
