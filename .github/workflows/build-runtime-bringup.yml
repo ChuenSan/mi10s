@@ -6,6 +6,7 @@ on:
     branches: [ main ]
     paths:
       - '.github/workflows/build-runtime-bringup.yml'
+      - 'configs/**'
       - 'dts/**'
       - 'patches/**'
       - 'scripts/**'
