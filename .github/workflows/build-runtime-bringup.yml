@@ -118,9 +118,11 @@ jobs:
             --os_version 13.0.0 \
             --os_patch_level 2024-01-01 \
             --ramdisk initramfs/initramfs.cpio.gz \
+            --dtb "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" \
             --base 0x00000000 \
             --kernel_offset 0x00008000 \
             --ramdisk_offset 0x01000000 \
+            --dtb_offset 0x01f00000 \
             --tags_offset 0x00000100 \
             --pagesize 4096 \
             --cmdline "$CMDLINE" \
