@@ -87,7 +87,11 @@ jobs:
           make -j"$(nproc)" Image.gz 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
           test -s arch/arm64/boot/Image.gz || { echo "FAIL: Image.gz 未生成"; exit 1; }
           make -j"$(nproc)" dtbs 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
-          ls -l arch/arm64/boot/Image arch/arm64/boot/Image.gz arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb
+          # appended DTB: 把 DTB 拼接到 kernel 末尾，ABL 通过搜索 DTB magic 定位
+          cat arch/arm64/boot/Image.gz arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb \
+            > arch/arm64/boot/Image.gz+dtb
+          test -s arch/arm64/boot/Image.gz+dtb || { echo "FAIL: Image.gz+dtb 未生成"; exit 1; }
+          ls -l arch/arm64/boot/Image arch/arm64/boot/Image.gz arch/arm64/boot/Image.gz+dtb arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb
 
       - name: Build diagnostic initramfs
         run: |
@@ -110,15 +114,13 @@ jobs:
           CMDLINE="console=ttyMSM0,115200n8 earlycon ignore_loglevel loglevel=8 initcall_debug clk_ignore_unused pd_ignore_unused rootwait"
           python3 tools/mkbootimg.py \
             --header_version 2 \
-            --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image.gz" \
+            --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image.gz+dtb" \
             --os_version 13.0.0 \
             --os_patch_level 2024-01-01 \
             --ramdisk initramfs/initramfs.cpio.gz \
-            --dtb "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" \
             --base 0x00000000 \
             --kernel_offset 0x00008000 \
             --ramdisk_offset 0x01000000 \
-            --dtb_offset 0x01f00000 \
             --tags_offset 0x00000100 \
             --pagesize 4096 \
             --cmdline "$CMDLINE" \
