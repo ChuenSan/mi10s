@@ -84,8 +84,10 @@ jobs:
           # 先单独 make Image（强制触发 vmlinux→Image 完整链接链），再 make dtbs
           make -j"$(nproc)" Image 2>&1 | tee "$GITHUB_WORKSPACE/build.log"
           test -s arch/arm64/boot/Image || { echo "FAIL: Image 未生成"; exit 1; }
+          make -j"$(nproc)" Image.gz 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
+          test -s arch/arm64/boot/Image.gz || { echo "FAIL: Image.gz 未生成"; exit 1; }
           make -j"$(nproc)" dtbs 2>&1 | tee -a "$GITHUB_WORKSPACE/build.log"
-          ls -l arch/arm64/boot/Image arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb
+          ls -l arch/arm64/boot/Image arch/arm64/boot/Image.gz arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb
 
       - name: Build diagnostic initramfs
         run: |
@@ -108,7 +110,9 @@ jobs:
           CMDLINE="console=ttyMSM0,115200n8 earlycon ignore_loglevel loglevel=8 initcall_debug clk_ignore_unused pd_ignore_unused rootwait"
           python3 tools/mkbootimg.py \
             --header_version 2 \
-            --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image" \
+            --kernel "$HOME/linux-sm8250/arch/arm64/boot/Image.gz" \
+            --os_version 13.0.0 \
+            --os_patch_level 2024-01-01 \
             --ramdisk initramfs/initramfs.cpio.gz \
             --dtb "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" \
             --base 0x00000000 \
@@ -144,7 +148,7 @@ jobs:
           cd "$GITHUB_WORKSPACE"
           mkdir -p dist
           cp "$HOME/linux-sm8250/arch/arm64/boot/Image"       dist/ || true
-          cp "$HOME/linux-sm8250/arch/arm64/boot/Image.gz"    dist/ || true
+          cp "$HOME/linux-sm8250/arch/arm64/boot/Image.gz"    dist/
           cp "$HOME/linux-sm8250/arch/arm64/boot/dts/qcom/sm8250-xiaomi-thyme.dtb" dist/
           cp initramfs/initramfs.cpio.gz                       dist/
           cp boot-thyme-test.img                               dist/
