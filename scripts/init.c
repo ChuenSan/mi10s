@@ -21,6 +21,7 @@
 #include <unistd.h>
 #include <sys/mount.h>
 #include <sys/stat.h>
+#include <sys/syscall.h>
 
 static int acmfd = -1;      /* /dev/ttyGS0 句柄，-1 表示不可用 */
 
@@ -197,6 +198,16 @@ int main(void)
     (void)mount("sysfs", "/sys", "sysfs", 0, NULL);
     (void)mkdir("/sys/kernel/config", 0755);
     (void)mount("configfs", "/sys/kernel/config", "configfs", 0, NULL);
+
+    /* REBOOT TEST: 如果内核能跑到这里，立即重启到 bootloader。
+       这是诊断性测试——区分"内核未启动"与"USB gadget 失败"。
+       观察：刷机后手机 5-10 秒内自动进入 fastboot=内核OK。
+       如果卡 logo=内核在 init 之前就崩溃了。 */
+#define LINUX_REBOOT_MAGIC1 0xfee1dead
+#define LINUX_REBOOT_MAGIC2 672274793
+#define LINUX_REBOOT_CMD_RESTART2 0xa1b2c3d4
+    syscall(SYS_reboot, LINUX_REBOOT_MAGIC1, LINUX_REBOOT_MAGIC2,
+            LINUX_REBOOT_CMD_RESTART2, "bootloader");
 
     stamp("THYME_STAGE_1_INIT");
 
